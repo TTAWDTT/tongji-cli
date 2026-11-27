@@ -249,7 +249,7 @@ curl -fsSL --create-dirs -o "$HOME/.claude/skills/tongji-cli/SKILL.md" https://r
 uv run python -m unittest discover -s tests -v
 ```
 
-## 学习通网页版（本地扩展）
+## 学习通网页版
 
 使用同一专用浏览器配置保存学习通会话；在超星官方网页登录后可读取课程、普通作业和提交状态。
 

@@ -194,7 +194,7 @@ tongji library rooms receipts --json
 
 其他命令、参数和生产环境验收范围见[仓库 README](https://github.com/TTAWDTT/tongji-cli#readme)。可随时用具体子命令的 `--help` 核对当前安装版本支持的选项。
 
-## 学习通网页版（本地扩展）
+## 学习通网页版
 
 - `tongji login --site chaoxing` 由用户在官方窗口认证；`status --site chaoxing --json` 核对登录。
 - `tongji chaoxing courses --json` 列出当前机构我学的课；同名多班使用复合 ID。
