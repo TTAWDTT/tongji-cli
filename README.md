@@ -21,6 +21,24 @@ tongji week
 
 如果终端找不到 `tongji`，按安装方式运行 `uv tool update-shell` 或 `pipx ensurepath`，然后重开终端。开发时仍可在仓库根目录运行 `./tongji`，它使用当前工作区的代码，与安装版共用登录配置。
 
+## 供 Agent 使用
+
+先在运行 agent 的环境里按「快速开始」安装 CLI，确认能运行 `tongji --help`。再把配套的 [SKILL.md](skill/SKILL.md) 下载到所用 agent 的技能目录。下面两种安装方式任选对应的一种，更新 skill 时可重跑同一条命令。
+
+**Codex**
+
+```sh
+curl -fsSL --create-dirs -o "$HOME/.agents/skills/tongji-cli/SKILL.md" https://raw.githubusercontent.com/TTAWDTT/tongji-cli/main/skill/SKILL.md
+```
+
+**Claude Code**
+
+```sh
+curl -fsSL --create-dirs -o "$HOME/.claude/skills/tongji-cli/SKILL.md" https://raw.githubusercontent.com/TTAWDTT/tongji-cli/main/skill/SKILL.md
+```
+
+打开新的 agent 会话，在 Codex 里输入 `$tongji-cli 看看未来七天的课表和作业`，或在 Claude Code 里输入 `/tongji-cli 看看未来七天的课表和作业`。执行个人查询时，agent 需要能访问已登录的本机浏览器配置；如果使用 Chromium，请让它继承 `TONGJI_BROWSER=chromium`。其他支持 Agent Skills 的工具可将同一文件放入各自的技能目录，保留 `tongji-cli/SKILL.md` 这层结构。
+
 ## 登录与一周安排
 
 `tongji login` 打开专用 Chrome，依次访问同济 Canvas 和教务工作台。请在学校页面完成认证，让命令自行关闭窗口。它会另起进程验证登录是否保留。专用配置位于 `~/.local/share/tongji-cli/chrome`。`tongji status` 默认检查教务与 Canvas。`--site service`、`--site library`、`--site jw`、`--site canvas`、`--site space`、`--site card`、`--site stadium` 和 `--site media` 可单查。`status --site all` 会检查全部八个站点，`login` 支持相同选项。学校要求重新认证时运行 `tongji login --site 站点名`。
