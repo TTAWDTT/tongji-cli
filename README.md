@@ -4,16 +4,18 @@
 
 ## 快速开始
 
-在任意目录运行下面的命令即可从 GitHub 主分支安装。使用 [uv](https://docs.astral.sh/uv/getting-started/installation/) 时运行：
+首次发布到 [PyPI](https://pypi.org/project/tongji-cli/) 后，在任意目录用 [uv](https://docs.astral.sh/uv/getting-started/installation/) 或 pipx 按包名安装，任选其一：
+
+```sh
+uv tool install tongji-cli
+# 或
+pipx install tongji-cli
+```
+
+首次发布前，可以直接安装 GitHub 主分支。使用 pipx 时，将下面的 `uv tool install` 换成 `pipx install`。
 
 ```sh
 uv tool install 'https://github.com/TTAWDTT/tongji-cli/archive/refs/heads/main.zip'
-```
-
-如果习惯使用 pipx，也可以用它安装：
-
-```sh
-pipx install 'https://github.com/TTAWDTT/tongji-cli/archive/refs/heads/main.zip'
 ```
 
 任选一种安装后，运行 `tongji --help` 查看命令。个人查询需要 Google Chrome，在 macOS 上安装 Chrome 后即可登录并查看本周安排。
