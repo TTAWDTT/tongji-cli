@@ -137,4 +137,85 @@ class BrowserParsingTest(unittest.TestCase):
         self.assertEqual(result['items'],[])
         self.assertEqual(read.call_count,2)
 
+    def test_permission_page_is_partial_and_other_courses_survive(self):
+        rows=[{'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'甲'},
+              {'id':'4:5','course_id':'4','class_id':'5','cpi':'3','title':'乙'}]
+        work='<li data="/mooc2/work/task?workId=9"><p class="overHidden2">报告</p><p class="status">未完成</p></li>'
+        with patch.object(chaoxing,'courses',return_value=rows), patch.object(chaoxing,'read',side_effect=[
+            '<input id="workEnc" value="x">','<p>你暂时没有权限查看此课程</p>',
+            '<input id="workEnc" value="x">',work,'<p>作答时间：11-01 08:00 至 12-03 20:00</p>']):
+            result=chaoxing.assignments(None,self.page)
+        self.assertEqual(result['status'],'partial')
+        self.assertEqual(result['errors'][0]['course'],'甲')
+        self.assertEqual(result['items'][0]['course'],'乙')
+
+    def test_explicit_empty_work_list_is_ok(self):
+        course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'甲'}
+        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=[
+            '<input id="workEnc" value="x">','<p class="empty">暂无作业</p>']):
+            result=chaoxing.assignments(None,self.page)
+        self.assertEqual(result['status'],'ok');self.assertEqual(result['items'],[])
+
+    def test_unrelated_date_does_not_replace_unknown_deadline(self):
+        course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'甲'}
+        work='<li data="/mooc2/work/task?workId=9"><p class="overHidden2">报告</p><p class="status">未完成</p></li>'
+        detail='<p>作答时间：11-01 08:00 至 12-03 20:00</p><p>参考上一轮活动，报名截止时间：2025-06-01 12:00</p>'
+        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=[
+            '<input id="workEnc" value="x">',work,detail]):
+            result=chaoxing.assignments(None,self.page)
+        item=result['items'][0]
+        self.assertIsNone(item['due'])
+        self.assertEqual(item['due_as_listed'],'11-01 08:00 至 12-03 20:00')
+        week=week_view({'jw':{'status':'ok','items':[]},'canvas':{'status':'ok','items':[]},'chaoxing':result},date(2026,11,28))['week']
+        self.assertEqual(week['undated_assignments'],[item])
+
+    def test_enabled_script_next_and_disabled_last_page(self):
+        for control, expected in [
+            ('<a rel="next" href="#" onclick="loadPage(2);return false">下一页</a>',True),
+            ('<a rel="next" href="#" onclick="loadPage(2)" class="disabled">下一页</a>',False),
+            ('<a rel="next" href="#" onclick="loadPage(2)" aria-disabled="true">下一页</a>',False)]:
+            with self.subTest(control=control):
+                self.assertEqual(chaoxing.document(self.page,'<div class="pagination">'+control+'</div>','has_next'),expected)
+
+    def test_script_next_marks_work_list_partial(self):
+        course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'甲'}
+        control='<div class="pagination"><a rel="next" href="#" onclick="loadPage(2);return false">下一页</a></div>'
+        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=[
+            '<input id="workEnc" value="x">',control]):
+            result=chaoxing.assignments(None,self.page)
+        self.assertEqual(result['status'],'partial');self.assertIn('下一页',result['errors'][0]['detail'])
+
+    def test_encoded_query_value_is_preserved_for_request_and_output(self):
+        course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'甲'}
+        work='<li data="/mooc2/work/task?workId=9&amp;label=A%26B"><p class="overHidden2">报告</p><p class="status">未完成</p></li>'
+        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=[
+            '<input id="workEnc" value="x">',work,'<p>作答时间：11-01 08:00 至 12-03 20:00</p>']) as read:
+            result=chaoxing.assignments(None,self.page)
+        target='https://mooc1.chaoxing.com/mooc2/work/task?workId=9&label=A%26B'
+        self.assertEqual(read.call_args.args[1],target)
+        self.assertEqual(result['items'][0]['url'],target)
+
+class DefaultSitesTest(unittest.TestCase):
+    def test_default_login_status_today_week_use_same_sites(self):
+        import io, json
+        from contextlib import redirect_stdout
+        from unittest.mock import MagicMock
+        from tongji_cli import cli, auth
+        states={'canvas':'authenticated','jw':'authenticated','chaoxing':'login_required'}
+        with TemporaryDirectory() as temp:
+            for command, extra, expected_code in [('login',[],0),('status',[],0),('today',[],0),('week',[],0),
+                ('today',['--include-chaoxing'],1),('week',['--include-chaoxing'],1)]:
+                with self.subTest(command=command,extra=extra):
+                    context=MagicMock();context.pages=[MagicMock()]
+                    with patch('sys.argv',['tongji',command,*extra,'--json']), patch.object(auth,'PROFILE',__import__('pathlib').Path(temp)), \
+                         patch.object(auth,'sync_playwright'),patch.object(auth,'open_session',return_value=context), \
+                         patch.object(auth,'visit',side_effect=lambda page,site,interactive:states[site]) as visit, \
+                         patch.object(auth.subprocess,'run',return_value=Mock(stdout=json.dumps({s:{'status':states[s]} for s in ('canvas','jw')}))), \
+                         patch.object(cli,'site_items',return_value=[]),redirect_stdout(io.StringIO()) as output:
+                        code=cli.run(cli.arguments())
+                    self.assertEqual(code,expected_code)
+                    self.assertEqual([c.args[1] for c in visit.call_args_list],['canvas','jw']+(['chaoxing'] if extra else []))
+                    if command=='week':
+                        self.assertEqual(json.loads(output.getvalue())['week']['status'],'partial' if extra else 'ok')
+
 if __name__=='__main__':unittest.main()

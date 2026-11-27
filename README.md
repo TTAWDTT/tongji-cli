@@ -259,10 +259,10 @@ tongji status --site chaoxing --json
 tongji chaoxing courses --json
 tongji chaoxing assignments --json
 tongji chaoxing assignments --course "课程ID:班级ID" --next 7 --json
-tongji week --json
+tongji week --include-chaoxing --json
 ```
 
-`week` 同时查询教务、Canvas、学习通。学习通作业放在每天的 `chaoxing_assignments` 中；截止时间缺失或缺少年份的作业放在 `week.undated_assignments`，保留 `due_as_listed` 原文。`today` 只列出能确认当天截止的作业。部分来源失败时保留其他结果并返回 `partial`，非零退出码不代表没有可用数据。
+`login`、`status`、`today`、`week` 默认均只覆盖教务与 Canvas。先运行 `login --site chaoxing` 完成学习通认证，再用 `week --include-chaoxing` 或 `today --include-chaoxing` 显式加入学习通。学习通作业放在每天的 `chaoxing_assignments` 中；截止时间缺失或缺少年份的作业放在 `week.undated_assignments`，保留 `due_as_listed` 原文。`today` 只列出能确认当天截止的作业。部分来源失败时保留其他结果并返回 `partial`，非零退出码不代表没有可用数据。
 
 课程范围是当前机构“我学的课”目录，不含归档目录和其他机构；作业不包括考试、章节测验。`--next` 以上海日期筛选，截止时间未知的条目仍保留。课程同名多班时使用 `courses` 返回的复合 ID。页面无法识别时返回未核实，不将其当作零项。登录过期或出现验证时，在官方页面重新认证。
 

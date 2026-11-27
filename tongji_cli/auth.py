@@ -127,7 +127,7 @@ def signed_in_queries(args, now, site_items):
         sites = list(SITES)
     elif site_filter in SITES:
         sites = [site_filter]
-    elif args.command in {"today", "week"}:
+    elif args.command in {"today", "week"} and getattr(args, "include_chaoxing", False):
         sites = ["canvas", "jw", "chaoxing"]
     else:
         sites = ["canvas", "jw"]

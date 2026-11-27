@@ -199,5 +199,5 @@ tongji library rooms receipts --json
 - `tongji login --site chaoxing` 由用户在官方窗口认证；`status --site chaoxing --json` 核对登录。
 - `tongji chaoxing courses --json` 列出当前机构我学的课；同名多班使用复合 ID。
 - `tongji chaoxing assignments --course "课程ID:班级ID" --json` 读取普通作业、提交状态及官方作答时间；省略课程查询当前目录。
-- `week` 已包含学习通；每日 `chaoxing_assignments` 是可定位日期的作业，`week.undated_assignments` 是截止时间未知的作业。回答待办时检查两处，不能将未知日期说成本周到期或已逾期。`today` 仅含能确认当天截止的项。
+- `week --include-chaoxing` 显式包含学习通（`today` 同样支持此选项）；默认 `login/status/today/week` 只覆盖教务与 Canvas。使用前先 `login --site chaoxing`。每日 `chaoxing_assignments` 是可定位日期的作业，`week.undated_assignments` 是截止时间未知的作业。回答待办时检查两处，不能将未知日期说成本周到期或已逾期。`today` 仅含能确认当天截止的项。
 - 只读取普通作业，不含考试和章节测验，不提供学习通提交操作。部分课程失败时保留成功项和错误范围。读取 `due_as_listed` 时保留原文，不补造年份。

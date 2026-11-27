@@ -1,7 +1,7 @@
 """学习通网页版查询；仅复用浏览器会话，不提交作业。"""
 import re
 from datetime import datetime, timedelta
-from urllib.parse import urlsplit, parse_qs, unquote, urljoin
+from urllib.parse import urlsplit, parse_qs, urljoin
 from playwright.sync_api import Error
 from tongji_cli.common import QueryUnavailable, SHANGHAI
 
@@ -24,9 +24,19 @@ def safe_url(url):
 
 
 def document(page, html, kind):
-    return page.evaluate("""([html, kind]) => {
+    return page.evaluate(r"""([html, kind]) => {
       const d = new DOMParser().parseFromString(html, 'text/html');
-      if (kind === 'has_next') return [...d.querySelectorAll('[rel=next], .pagination a, .paging a')].some(a => (a.rel === 'next' || /下一页|下页/.test(a.textContent)) && !a.closest('.disabled, [aria-disabled=true]') && !a.hasAttribute('disabled') && a.getAttribute('href') && a.getAttribute('href') !== '#');
+      const timeField = root => {
+        const pattern = /^(作答时间|截止时间|截止日期|结束时间|截止)\s*[:：]\s*((?:(?:\d{4}[-/])?\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?)(?:\s*至\s*(?:(?:\d{4}[-/])?\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?)?)?)/;
+        const elements = [...root.querySelectorAll('p,div,span,li,td')];
+        if (!root.children.length) elements.push(root);
+        const fields = elements.filter(e => ![...e.children].some(c => pattern.test(c.textContent.trim())))
+          .map(e => e.textContent.trim().match(pattern)).filter(Boolean);
+        const field = fields.find(m => m[1] === '作答时间') || fields[0];
+        return field ? {field: field[1] + ':' + field[2], value: field[2].trim()} : null;
+      };
+      if (kind === 'time') return timeField(d.body);
+      if (kind === 'has_next') return [...d.querySelectorAll('[rel=next], .pagination a, .paging a')].some(a => (a.rel === 'next' || /下一页|下页/.test(a.textContent)) && !a.closest('.disabled, [aria-disabled=true]') && !a.hasAttribute('disabled') && (a.getAttribute('onclick') || (a.getAttribute('href') && !['#', 'javascript:void(0)', 'javascript:;'].includes(a.getAttribute('href')))));
       if (kind === 'courses') return [...d.querySelectorAll('[href], [onclick]')].map(a => ({
         link: a.getAttribute('href') || a.getAttribute('onclick'),
         title: (a.closest('.course') || a.closest('li') || a).querySelector('[class*=course-name]')?.getAttribute('title') || a.getAttribute('title') || a.textContent.trim()
@@ -34,7 +44,7 @@ def document(page, html, kind):
       if (kind === 'hidden') return Object.fromEntries([...d.querySelectorAll('input[id]')].map(x => [x.id, x.value]));
       return [...d.querySelectorAll('li[data]')].map(x => ({
         url: x.getAttribute('data'), title: x.querySelector('p.overHidden2')?.textContent.trim(),
-        state: x.querySelector('p.status')?.textContent.trim(), text: x.textContent.trim()
+        state: x.querySelector('p.status')?.textContent.trim(), text: x.textContent.trim(), time: timeField(x)
       }));
     }""", [html, kind])
 
@@ -102,9 +112,10 @@ def courses(context, page):
 
 
 def deadline(text):
-    match = re.search(r'(?:截止时间|截止日期|结束时间|截止)\s*[:：]?\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?)', text)
+    stamp = r'\d{4}[-/]\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?'
+    match = re.fullmatch(r'(?:截止时间|截止日期|结束时间|截止)\s*[:：]\s*(' + stamp + r')\s*', text)
     if not match:
-        match = re.search(r'作答时间\s*[:：][^\n\r]*?至\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?)', text)
+        match = re.fullmatch(r'作答时间\s*[:：]\s*(?:' + stamp + r'|\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2})\s*至\s*(' + stamp + r')\s*', text)
     if not match:
         return None
     try:
@@ -145,13 +156,15 @@ def assignments(context, page, selector=None):
             html = read(context, WORKS, {'courseId': course['course_id'], 'classId': course['class_id'], 'cpi': course['cpi'], 'ut': 's', 'enc': fields['workEnc'], 'openc': fields.get('openc', ''), 'stuenc': fields.get('enc', ''), 'isdisplaytable': 2})
             if document(page, html, 'has_next'):
                 raise QueryUnavailable('作业目录还有下一页，当前无法确认完整范围')
+            if re.search('没有权限|权限不足|无权访问|禁止访问', html):
+                raise QueryUnavailable('学习通未授权查看此课程作业')
             rows = document(page, html, 'works')
-            if not rows and not re.search('暂无作业|没有作业|暂时没有|未发布作业', html):
+            if not rows and not re.search('暂无作业|没有作业|未发布作业', html):
                 raise QueryUnavailable("作业页面结构未识别，不能判定没有作业")
             for row in rows:
                 if not row['title'] or not row['state']:
                     raise QueryUnavailable("作业字段缺失")
-                target = safe_url(urljoin(WORKS, unquote(row['url'])))
+                target = safe_url(urljoin(WORKS, row['url']))
                 if not urlsplit(target).path.endswith('/work/task'):
                     raise QueryUnavailable('未识别为只读作业详情入口，已停止读取')
                 query = parse_qs(urlsplit(target).query)
@@ -167,15 +180,16 @@ def assignments(context, page, selector=None):
                 item = {'id': identity, 'course': course['title'], 'course_id': course['course_id'],
                         'class_id': course['class_id'], 'title': row['title'],
                         'submission_state': row['state'], 'submitted': submitted(row['state']),
-                        'due': deadline(row['text']), 'due_as_listed': None,
+                        'due': deadline(row['time']['field']) if row['time'] else None,
+                        'due_as_listed': row['time']['value'] if row['time'] else None,
                         'detail': row['text'], 'url': target, 'source': 'chaoxing'}
                 items.append(item)
                 try:
                     detail = read(context, target)
-                    detail_text = page.evaluate("s => { const d = new DOMParser().parseFromString(s, 'text/html'); d.querySelectorAll('script,style').forEach(x => x.remove()); return d.body.textContent; }", detail)
-                    times = re.search(r'作答时间\s*[:：]\s*([^\n\r]+)', detail_text)
-                    item['due_as_listed'] = times[1].strip() if times else None
-                    item['due'] = item['due'] or deadline(detail_text)
+                    time = document(page, detail, 'time')
+                    if time:
+                        item['due_as_listed'] = time['value']
+                        item['due'] = deadline(time['field'])
                 except (QueryUnavailable, Error) as error:
                     item['detail_status'] = 'unverified'
                     errors.append({'course': course['title'], 'id': identity,

@@ -25,8 +25,9 @@ def arguments():
     for name in ("login", "status"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--site", choices=["all", *SITES], help="默认检查教务和 Canvas；all 包括一网通办、图书馆、空间预约、一卡通、体育场馆、教学媒体平台和学习通")
-    commands.add_parser("today", help="今日课表、今日截止作业")
-    commands.add_parser("week", help="未来七个上海日期的课表和作业")
+    for name, help_text in (("today", "今日课表、今日截止作业"), ("week", "未来七个上海日期的课表和作业")):
+        cmd = commands.add_parser(name, help=help_text)
+        cmd.add_argument("--include-chaoxing", action="store_true", help="同时查询学习通；须先 login --site chaoxing")
     cx = commands.add_parser("chaoxing", help="学习通课程与作业查询")
     cx_ops = cx.add_subparsers(dest="operation", required=True)
     cx_ops.add_parser("courses")
