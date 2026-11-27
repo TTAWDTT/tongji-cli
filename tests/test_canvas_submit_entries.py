@@ -1,16 +1,14 @@
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-import sys
 from threading import Thread
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from playwright.sync_api import sync_playwright
 
-import queries
-from canvas_submit import matches_submission, submit, submission_text
+from tongji_cli.canvas import api as canvas_api
+from tongji_cli.common import QueryUnavailable
+from tongji_cli.canvas.submit import matches_submission, submit, submission_text
 
 
 TYPES = ("online_text_entry", "online_url")
@@ -77,7 +75,7 @@ class EntrySite(BaseHTTPRequestHandler):
         data = {
             "/api/v1/courses": [{"id": 3, "name": "course"}],
             "/api/v1" + PATH: {"id": 6, "name": "assignment", "submission_types": self.server.types,
-                               "html_url": queries.CANVAS + PATH},
+                               "html_url": canvas_api.CANVAS + PATH},
             "/api/v1" + PATH + "/submissions/self": self.server.receipt,
         }
         if path not in data:
@@ -121,17 +119,17 @@ class EntryTest(unittest.TestCase):
             server.pending_reads = []
             Thread(target=server.serve_forever, daemon=True).start()
             try:
-                with patch.object(queries, "CANVAS", f"http://127.0.0.1:{server.server_port}"), sync_playwright() as pw:
+                with patch.object(canvas_api, "CANVAS", f"http://127.0.0.1:{server.server_port}"), sync_playwright() as pw:
                     browser = pw.chromium.launch(channel="chrome")
                     context = browser.new_context()
                     page = context.new_page()
                     body = "if ok:\n    answer = 'A<&B'\n\nfinish"
                     url = "https://example.org/path?a=1&b=2#answer"
                     for bad in ({}, {"text": " "}, {"text": "yes", "url": url}, {"url": "file:///tmp/a"}):
-                        with self.assertRaises(queries.QueryUnavailable):
+                        with self.assertRaises(QueryUnavailable):
                             submit(context, page, "3", 6, [], True, **bad)
                     server.types = ["online_text_entry"]
-                    with self.assertRaisesRegex(queries.QueryUnavailable, "未向本人开放"):
+                    with self.assertRaisesRegex(QueryUnavailable, "未向本人开放"):
                         submit(context, page, "3", 6, None, False, url=url)
                     server.types = TYPES
                     for options in ({"text": body}, {"url": url}):

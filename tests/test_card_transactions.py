@@ -1,12 +1,9 @@
 import unittest
-from pathlib import Path
-import sys
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from card_transactions import read_pages, report_response
-from queries import QueryUnavailable
+from tongji_cli.campus.card_transactions import read_pages, report_response
+from tongji_cli.common import QueryUnavailable
 
 
 class CardTransactionsTest(unittest.TestCase):

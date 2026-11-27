@@ -1,15 +1,12 @@
 import json
 import os
-import sys
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from threading import Thread
 from unittest.mock import patch
 from urllib.parse import urlsplit
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import school_calendar as calendar
+from tongji_cli.campus import school_calendar as calendar
 
 
 class Rooms(BaseHTTPRequestHandler):

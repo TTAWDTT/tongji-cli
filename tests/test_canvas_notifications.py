@@ -1,17 +1,15 @@
 import json
-import sys
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from threading import Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import queries
-from canvas_notifications import notification_settings
+from tongji_cli.canvas import api as canvas_api
+from tongji_cli.common import QueryUnavailable
+from tongji_cli.canvas.notifications import notification_settings
 
 
 class SettingsSite(BaseHTTPRequestHandler):
@@ -60,7 +58,7 @@ class NotificationTest(unittest.TestCase):
         server.writes = 0
         Thread(target=server.serve_forever, daemon=True).start()
         try:
-            with patch.object(queries, "CANVAS", f"http://127.0.0.1:{server.server_port}"), sync_playwright() as pw:
+            with patch.object(canvas_api, "CANVAS", f"http://127.0.0.1:{server.server_port}"), sync_playwright() as pw:
                 browser = pw.chromium.launch(channel="chrome")
                 page = browser.new_page()
                 args = SimpleNamespace(operation="notification", category="due_date", channel=1,
@@ -69,7 +67,7 @@ class NotificationTest(unittest.TestCase):
                 self.assertEqual((result["action"], result["notifications"], server.writes), ("preview", 2, 0))
                 args.preview = False
                 args.category = ""
-                with self.assertRaisesRegex(queries.QueryUnavailable, "没有此通知类别"):
+                with self.assertRaisesRegex(QueryUnavailable, "没有此通知类别"):
                     notification_settings(page.context, page, args)
                 self.assertEqual(server.writes, 0)
                 args.category = "due_date"

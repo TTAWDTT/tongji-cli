@@ -1,6 +1,4 @@
 import json
-import runpy
-import sys
 import unittest
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,11 +8,11 @@ from threading import Thread
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import canvas_api
-import queries
-import school_calendar
-from jw_records import credit_categories, plan_courses
+from tongji_cli.schedule import week_view
+from tongji_cli.canvas import api as canvas_api
+from tongji_cli.common import QueryUnavailable, SHANGHAI
+from tongji_cli.campus import school_calendar
+from tongji_cli.jw.records import credit_categories, plan_courses
 from playwright.sync_api import sync_playwright
 
 
@@ -63,7 +61,7 @@ class CanvasFixture(BaseHTTPRequestHandler):
             "courses": [{"id": 7, "name": "测试课", "course_code": "C7"}],
             "courses/7/assignments": tasks[1:] if "page" in params else tasks[:1],
             "courses/7/assignments/11": {**tasks[0], "description": "<p>阅读</p><p>附件</p>"},
-            "courses/7/files/3": {"id": 3, "display_name": "样例文件", "size": 6, "url": queries.CANVAS + "/sample-download"},
+            "courses/7/files/3": {"id": 3, "display_name": "样例文件", "size": 6, "url": canvas_api.CANVAS + "/sample-download"},
             "calendar_events": [{"id": 1, "title": "全天", "all_day": True, "all_day_date": "2026-11-27",
                                  "context_code": params.get("context_codes[]", ["self"])[0]}]
                 if params.get("start_date") == ["2026-11-27T00:00:00+08:00"]
@@ -81,7 +79,7 @@ class CanvasFixture(BaseHTTPRequestHandler):
                 {"plannable_type": "assignment", "plannable_id": 6, "plannable_date": "2026-12-03T16:00:00Z",
                  "plannable": {"title": "窗口外"}},
             ],
-            "courses/7/pages/read": {"id": 7, "title": "阅读", "url": "read", "html_url": queries.CANVAS + "/read",
+            "courses/7/pages/read": {"id": 7, "title": "阅读", "url": "read", "html_url": canvas_api.CANVAS + "/read",
                 "body": '<p>阅读资料</p><a href="/file/3">讲义</a><img src="/fig.png" alt="图一">'},
             "courses/7/assignments/11/submissions/self": {"assignment_id": 11, "workflow_state": "graded",
                 "score": 0, "attachments": [{"display_name": "样例", "size": 0}], "submission_comments": [{"comment": "修改", "author_name": "教师"}]},
@@ -96,7 +94,7 @@ class CanvasFixture(BaseHTTPRequestHandler):
             "announcements": [{"context_code": "course_7", "posted_at": "2026-11-26T18:00:00Z",
                                "html_url": "/notice", "title": "通知", "message": "<p>内容</p>"}],
         }
-        group_page = {"title": "分工", "url": "team-work", "html_url": queries.CANVAS + "/groups/3/pages/team-work"}
+        group_page = {"title": "分工", "url": "team-work", "html_url": canvas_api.CANVAS + "/groups/3/pages/team-work"}
         if path == "groups/3/discussion_topics" and params.get("only_announcements") == ["true"]:
             notice = {"title": "周六分工", "html_url": "/groups/3/discussion_topics/2", "published": True,
                       "posted_at": "2026-11-20T16:00:00Z", "message": "<p>分配任务</p>"}
@@ -114,10 +112,10 @@ class CanvasFixture(BaseHTTPRequestHandler):
         rows["courses/8/assignments/21/submissions/self"] = dict(rows["courses/7/assignments/11/submissions/self"], assignment_id=21)
         archived_receipt = rows["courses/8/assignments/21/submissions/self"]
         archived_receipt["attachments"] = [{"id": 91, "display_name": "报告", "size": 6,
-                                            "url": queries.CANVAS + "/sample-download"}]
+                                            "url": canvas_api.CANVAS + "/sample-download"}]
         archived_receipt["submission_comments"] = [{"comment": "修改", "attachments": [
-            {"id": 92, "display_name": "报告", "size": 0, "url": queries.CANVAS + "/empty-download"},
-            {"id": 93, "display_name": "不完整", "size": 7, "url": queries.CANVAS + "/sample-download"},
+            {"id": 92, "display_name": "报告", "size": 0, "url": canvas_api.CANVAS + "/empty-download"},
+            {"id": 93, "display_name": "不完整", "size": 7, "url": canvas_api.CANVAS + "/sample-download"},
             {"id": 94, "display_name": "未开放", "size": 0, "locked_for_user": True}
         ]}]
         archived_receipt.update(attempt=2, submitted_at="2026-06-02T01:00:00Z")
@@ -126,7 +124,7 @@ class CanvasFixture(BaseHTTPRequestHandler):
                 dict(archived_receipt),
                 {"attempt": None, "workflow_state": "unsubmitted", "submitted_at": None},
                 {"attempt": 1, "workflow_state": "submitted", "submitted_at": "2026-06-01T01:00:00Z",
-                 "attachments": [{"id": 90, "size": 0, "display_name": "报告", "url": queries.CANVAS + "/empty-download"}]}
+                 "attachments": [{"id": 90, "size": 0, "display_name": "报告", "url": canvas_api.CANVAS + "/empty-download"}]}
             ]
         rows["courses/8/modules"] = []
         rows["courses/8/files"] = [{"id": 3, "display_name": "往期讲义", "size": 6}]
@@ -150,8 +148,8 @@ class CommandsTest(unittest.TestCase):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), CanvasFixture)
         cls.worker = Thread(target=cls.server.serve_forever, daemon=True)
         cls.worker.start()
-        cls.origin = queries.CANVAS
-        queries.CANVAS = f"http://127.0.0.1:{cls.server.server_port}"
+        cls.origin = canvas_api.CANVAS
+        canvas_api.CANVAS = f"http://127.0.0.1:{cls.server.server_port}"
         cls.engine = sync_playwright().start()
         cls.browser = cls.engine.chromium.launch(channel="chrome")
         cls.ctx = cls.browser.new_context()
@@ -159,7 +157,7 @@ class CommandsTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        queries.CANVAS = cls.origin
+        canvas_api.CANVAS = cls.origin
         cls.browser.close()
         cls.engine.stop()
         cls.server.shutdown()
@@ -181,7 +179,7 @@ class CommandsTest(unittest.TestCase):
         archived, = canvas_api.discussions(self.ctx, "测试课", state="completed")
         topic, = canvas_api.discussions(self.ctx, "测试课", archived["id"], True, "completed")
         self.assertEqual((topic["course_id"], topic["body"], topic["replies"][0]["body"]), (8, "讨论正文", "讨论回复"))
-        with self.assertRaises(queries.QueryUnavailable):
+        with self.assertRaises(QueryUnavailable):
             canvas_api.discussions(self.ctx, "8")
 
     def test_date_range_and_all_tasks(self):
@@ -210,7 +208,7 @@ class CommandsTest(unittest.TestCase):
         self.assertNotIn("course_id", row)
         item, = canvas_api.scoped_pages(self.ctx, "groups", group, row["slug"])
         self.assertEqual((item["body"], item["locked"]), ("本周任务\n文档", False))
-        self.assertEqual(item["resources"][0]["url"], queries.CANVAS + "/groups/3/files/4")
+        self.assertEqual(item["resources"][0]["url"], canvas_api.CANVAS + "/groups/3/files/4")
 
     def test_download_creates_a_new_file(self):
         with TemporaryDirectory() as tmp:
@@ -218,11 +216,11 @@ class CommandsTest(unittest.TestCase):
             item, = canvas_api.download_file(self.ctx, "7", 3, destination)
             self.assertEqual(destination.read_bytes(), b"sample")
             self.assertEqual(item["bytes"], 6)
-            with self.assertRaises(queries.QueryUnavailable):
+            with self.assertRaises(QueryUnavailable):
                 canvas_api.download_file(self.ctx, "7", 3, destination)
 
     def test_completed_materials_pages_and_download(self):
-        with self.assertRaises(queries.QueryUnavailable):
+        with self.assertRaises(QueryUnavailable):
             canvas_api.course_files(self.ctx, "8")
         file, = canvas_api.course_files(self.ctx, "测试课", "completed")
         self.assertEqual((file["course_id"], file["title"]), (8, "往期讲义"))
@@ -238,12 +236,12 @@ class CommandsTest(unittest.TestCase):
 
     def test_completed_course_assignments_and_personal_feedback(self):
         course = "测试课"
-        row, = canvas_api.tasks(self.ctx, datetime.now(queries.SHANGHAI).date(), None, course, state="completed")
+        row, = canvas_api.tasks(self.ctx, datetime.now(SHANGHAI).date(), None, course, state="completed")
         detail, = canvas_api.show_assignment(self.ctx, course, row["id"], "completed")
         receipt, = canvas_api.own_submission(self.ctx, course, row["id"], "completed")
         self.assertEqual((row["course_id"], detail["instructions"], receipt["course_id"]), (8, "课程报告", 8))
         self.assertEqual((receipt["id"], receipt["score"], receipt["feedback"][0]["comment"]), (21, 0, "修改"))
-        with self.assertRaises(queries.QueryUnavailable):
+        with self.assertRaises(QueryUnavailable):
             canvas_api.own_submission(self.ctx, course, row["id"])
 
     def test_submission_and_feedback_attachment_download(self):
@@ -256,12 +254,12 @@ class CommandsTest(unittest.TestCase):
             for file, content, source in [(uploaded, b"sample", "submission"), (marked, b"", "feedback")]:
                 result, = canvas_api.download_submission_attachment(self.ctx, "8", 21, file["id"], dest, "completed")
                 self.assertEqual((dest.read_bytes(), result["source"], result["assignment_id"]), (content, source, 21))
-                with self.assertRaisesRegex(queries.QueryUnavailable, "已存在"):
+                with self.assertRaisesRegex(QueryUnavailable, "已存在"):
                     canvas_api.download_submission_attachment(self.ctx, "8", 21, file["id"], dest, "completed")
                 self.assertEqual(dest.read_bytes(), content)
                 dest.unlink()
             for file_id, message in [(3, "没有该附件"), (93, "字节数"), (94, "开放下载")]:
-                with self.assertRaisesRegex(queries.QueryUnavailable, message):
+                with self.assertRaisesRegex(QueryUnavailable, message):
                     canvas_api.download_submission_attachment(self.ctx, "8", 21, file_id, dest, "completed")
                 self.assertFalse(dest.exists())
 
@@ -276,10 +274,10 @@ class CommandsTest(unittest.TestCase):
             self.assertEqual((downloaded["attempt"], dest.read_bytes()), (1, b""))
             dest.unlink()
             for attempt, attachment in [(None, 90), (1, 91), (2, 92), (3, 90)]:
-                with self.subTest(attempt=attempt, attachment=attachment), self.assertRaises(queries.QueryUnavailable):
+                with self.subTest(attempt=attempt, attachment=attachment), self.assertRaises(QueryUnavailable):
                     canvas_api.download_submission_attachment(self.ctx, "8", 21, attachment, dest, "completed", attempt=attempt)
                 self.assertFalse(dest.exists())
-        with self.assertRaisesRegex(queries.QueryUnavailable, "未提供"):
+        with self.assertRaisesRegex(QueryUnavailable, "未提供"):
             canvas_api.own_submission(self.ctx, "7", 12, history=True)
 
     def test_read_back_submitted_text_and_link(self):
@@ -295,30 +293,30 @@ class CommandsTest(unittest.TestCase):
         self.assertEqual(row["instructions"], "阅读\n附件")
         items = canvas_api.materials(self.ctx, "7")
         self.assertEqual([r["title"] for r in items], ["模块资料", "阅读", "额外附件"])
-        result, = canvas_api.announcements(self.ctx, 7, datetime(2026,11,27,12,tzinfo=queries.SHANGHAI))
+        result, = canvas_api.announcements(self.ctx, 7, datetime(2026,11,27,12,tzinfo=SHANGHAI))
         self.assertEqual(result["posted"], "2026-11-27T02:00:00+08:00")
 
     def test_group_announcements_use_release_date_and_group(self):
         group = {"id": 3, "title": "小组"}
-        now = datetime(2026, 11, 27, 12, tzinfo=queries.SHANGHAI)
+        now = datetime(2026, 11, 27, 12, tzinfo=SHANGHAI)
         items = canvas_api.announcements(self.ctx, 7, now, group=group)
         self.assertEqual([(r["title"], r["posted"]) for r in items], [
             ("周四讨论", "2026-11-26T10:00:00+08:00"), ("周六分工", "2026-11-21T00:00:00+08:00")])
         self.assertTrue(all(r["group_id"] == 3 and r["body"] == "分配任务" for r in items))
 
     def test_calendar_range_reports_missing_and_unknown_days(self):
-        with patch.object(school_calendar, "API", queries.CANVAS):
+        with patch.object(school_calendar, "API", canvas_api.CANVAS):
             start, end = date(2026, 11, 23), date(2026, 11, 26)
             span = school_calendar.calendar_range(start, end)
             self.assertEqual(span["status"], "partial")
             self.assertEqual([r["day_type"] for r in span["items"]], ["工作日", None, None, "周末"])
             self.assertEqual(school_calendar.calendar_range(end, end)["status"], "ok")
             self.assertEqual(school_calendar.calendar_range(self.day, self.day)["status"], "unverified")
-            with self.assertRaisesRegex(queries.QueryUnavailable, "结束日期"):
+            with self.assertRaisesRegex(QueryUnavailable, "结束日期"):
                 school_calendar.calendar_range(end, start)
 
     def test_authorized_room_schedule(self):
-        with patch.object(school_calendar, "API", queries.CANVAS), patch.dict("os.environ", TONGJI_OPEN_TOKEN="fixture"):
+        with patch.object(school_calendar, "API", canvas_api.CANVAS), patch.dict("os.environ", TONGJI_OPEN_TOKEN="fixture"):
             room, = school_calendar.room_schedule("R1", None)
             self.assertEqual(room["room"], "R1")
             self.assertEqual(room["schedule"], [])
@@ -350,10 +348,9 @@ class CommandsTest(unittest.TestCase):
             page.close()
 
     def test_partial_week(self):
-        code = runpy.run_path(str(Path(queries.__file__).with_name("tongji")))
         inputs = {"jw": {"status": "login_required"}, "canvas": {"status": "authenticated",
                   "items": [{"due": "2026-11-28T10:00:00+08:00", "title": "作业"}]}}
-        summary = code["week_view"](inputs, self.day)["week"]
+        summary = week_view(inputs, self.day)["week"]
         self.assertEqual(summary["status"], "partial")
         self.assertEqual(len(summary["items"]), 7)
         self.assertNotIn("classes", summary["items"][0])

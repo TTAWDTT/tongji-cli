@@ -1,4 +1,3 @@
-import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,9 +6,8 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_forms import CATALOGS, forms
-from queries import QueryUnavailable
+from tongji_cli.jw.forms import CATALOGS, forms
+from tongji_cli.common import QueryUnavailable
 
 
 class AcademicFormsTest(unittest.TestCase):

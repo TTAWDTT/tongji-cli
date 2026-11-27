@@ -1,12 +1,9 @@
 import unittest
-from pathlib import Path
-import sys
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from library_loans import loan_pages
-from queries import QueryUnavailable
+from tongji_cli.library.loans import loan_pages
+from tongji_cli.common import QueryUnavailable
 
 
 class LoanPagesTest(unittest.TestCase):
@@ -31,7 +28,7 @@ class LoanPagesTest(unittest.TestCase):
                 browser.close()
 
     def test_history_uses_the_return_date_table_and_keeps_repeated_loans(self):
-        from library_loans import history_pages
+        from tongji_cli.library.loans import history_pages
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch(channel="chrome")
@@ -57,7 +54,7 @@ class LoanPagesTest(unittest.TestCase):
     def test_renewal_requires_one_barcode_and_a_later_due_date(self):
         from datetime import date
         from types import SimpleNamespace
-        from library_loans import renew_book
+        from tongji_cli.library.loans import renew_book
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch(channel="chrome")

@@ -1,15 +1,12 @@
-import sys
 import unittest
 from datetime import date
-from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from queries import QueryUnavailable
-from stadium_orders import orders, reserve
+from tongji_cli.common import QueryUnavailable
+from tongji_cli.campus.stadium_orders import orders, reserve
 
 
 APP = """<!doctype html><meta charset=utf-8>

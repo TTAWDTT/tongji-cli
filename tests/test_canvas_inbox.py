@@ -1,17 +1,14 @@
 import json
-import sys
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from threading import Thread
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import queries
-from canvas_inbox import conversation, inbox, recipients
+from tongji_cli.canvas import api as canvas_api
+from tongji_cli.canvas.inbox import conversation, inbox, recipients
 
 
 class InboxSite(BaseHTTPRequestHandler):
@@ -68,7 +65,7 @@ class InboxTest(unittest.TestCase):
         Thread(target=cls.server.serve_forever, daemon=True).start()
         cls.pw = sync_playwright().start()
         cls.client = cls.pw.request.new_context()
-        cls.host = patch.object(queries, "CANVAS", f"http://127.0.0.1:{cls.server.server_port}")
+        cls.host = patch.object(canvas_api, "CANVAS", f"http://127.0.0.1:{cls.server.server_port}")
         cls.host.start()
         from types import SimpleNamespace
         cls.context = SimpleNamespace(request=cls.client)

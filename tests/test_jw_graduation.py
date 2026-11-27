@@ -1,15 +1,12 @@
 import json
-import sys
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_graduation import DEFENSE_LIST, DEFENSE_VIEW, TASK_LIST, TASK_VIEW, defenses, task_books
-from queries import QueryUnavailable
+from tongji_cli.jw.graduation import DEFENSE_LIST, DEFENSE_VIEW, TASK_LIST, TASK_VIEW, defenses, task_books
+from tongji_cli.common import QueryUnavailable
 
 
 class GraduationTest(unittest.TestCase):

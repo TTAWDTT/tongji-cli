@@ -1,20 +1,20 @@
+from tongji_cli.cli import arguments, site_items
+from tongji_cli.cli import arguments
 import html
 import json
-import runpy
 import sys
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime
-from pathlib import Path
 from threading import Thread
 from unittest.mock import patch
 from urllib.parse import urlsplit
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from playwright.sync_api import sync_playwright
 
-import queries
-from canvas_discussion import reply
+from tongji_cli.canvas import api as canvas_api
+from tongji_cli.common import QueryUnavailable
+from tongji_cli.canvas.discussion import reply
 
 
 TOPIC = "/courses/1/discussion_topics/2"
@@ -93,7 +93,7 @@ class DiscussionSite(BaseHTTPRequestHandler):
         if self.path == "/api/v1/groups/9/discussion_topics":
             self.server.created_topic = {"id": 20, "title": data["title"], "published": False,
                 "message": html.escape(data["message"]).replace("\n", "<br>"),
-                "html_url": queries.CANVAS + "/groups/9/discussion_topics/20"}
+                "html_url": canvas_api.CANVAS + "/groups/9/discussion_topics/20"}
             self.respond(self.server.created_topic)
             return
         entry_id = 10 + len(self.server.posts)
@@ -111,7 +111,6 @@ class DiscussionSite(BaseHTTPRequestHandler):
 
 class ReplyTest(unittest.TestCase):
     def test_group_discussion_cli_list_detail_preview_and_receipt(self):
-        app = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tongji"))
         with ThreadingHTTPServer(("127.0.0.1", 0), DiscussionSite) as server:
             server.posts = []
             server.locked = server.bad_receipt = False
@@ -119,19 +118,19 @@ class ReplyTest(unittest.TestCase):
             server.page = CLASSIC.replace("/courses/1/", "/groups/9/")
             Thread(target=server.serve_forever, daemon=True).start()
             try:
-                with patch.object(queries, "CANVAS", f"http://127.0.0.1:{server.server_port}"), sync_playwright() as pw:
+                with patch.object(canvas_api, "CANVAS", f"http://127.0.0.1:{server.server_port}"), sync_playwright() as pw:
                     browser = pw.chromium.launch(channel="chrome")
                     page = browser.new_page()
                     def cli(*args):
                         with patch.object(sys, "argv", ["tongji", "canvas", *args, "--group", "9"]):
-                            parsed = app["arguments"]()
-                        return app["site_items"](parsed, "canvas", page.context, page, datetime.now())
+                            parsed = arguments()
+                        return site_items(parsed, "canvas", page.context, page, datetime.now())
                     topic, = cli("discussions")
                     self.assertEqual((topic["id"], topic["group_id"]), (2, 9))
                     self.assertNotIn("course_id", topic)
                     detail, = cli("discussion", "show", "2", "--replies")
                     self.assertEqual((detail["body"], detail["replies"][1]["parent_id"]), ("Topic body", 5))
-                    with self.assertRaisesRegex(queries.QueryUnavailable, "可进入小组"):
+                    with self.assertRaisesRegex(QueryUnavailable, "可进入小组"):
                         cli("discussions", "--state", "completed")
                     posting = ("discussion", "reply", "2", "--message", "group note")
                     preview, = cli(*posting, "--preview")
@@ -149,7 +148,7 @@ class ReplyTest(unittest.TestCase):
                     self.assertEqual((created["action"], created["id"], created["group_id"], created["published"]),
                                      ("created", 20, 9, False))
                     server.bad_receipt = True
-                    with self.assertRaisesRegex(queries.QueryUnavailable, "保存回执未核实"):
+                    with self.assertRaisesRegex(QueryUnavailable, "保存回执未核实"):
                         cli(*new_topic)
                     browser.close()
             finally:
@@ -163,7 +162,7 @@ class ReplyTest(unittest.TestCase):
             server.page = MODERN
             Thread(target=server.serve_forever, daemon=True).start()
             try:
-                with patch.object(queries, "CANVAS", f"http://127.0.0.1:{server.server_port}"), sync_playwright() as pw:
+                with patch.object(canvas_api, "CANVAS", f"http://127.0.0.1:{server.server_port}"), sync_playwright() as pw:
                     browser = pw.chromium.launch(channel="chrome")
                     ctx = browser.new_context()
                     page = ctx.new_page()
@@ -171,7 +170,7 @@ class ReplyTest(unittest.TestCase):
                     def send(parent=None, preview=False):
                         return reply(ctx, page, "1", 2, parent, message, preview)[0]
                     self.assertEqual(send(preview=True)["action"], "preview")
-                    with self.assertRaisesRegex(queries.QueryUnavailable, "未找到"):
+                    with self.assertRaisesRegex(QueryUnavailable, "未找到"):
                         send(99)
                     self.assertEqual(server.posts, [])
                     self.assertEqual(send()["id"], 10)
@@ -180,14 +179,14 @@ class ReplyTest(unittest.TestCase):
                     server.page = CLASSIC
                     self.assertEqual(send()["id"], 12)
                     server.bad_receipt = True
-                    with self.assertRaisesRegex(queries.QueryUnavailable, "回执未核实"):
+                    with self.assertRaisesRegex(QueryUnavailable, "回执未核实"):
                         send()
                     server.locked = True
-                    with self.assertRaisesRegex(queries.QueryUnavailable, "未开放"):
+                    with self.assertRaisesRegex(QueryUnavailable, "未开放"):
                         send()
                     server.locked = False
                     server.anonymity = "full_anonymity"
-                    with self.assertRaisesRegex(queries.QueryUnavailable, "匿名讨论"):
+                    with self.assertRaisesRegex(QueryUnavailable, "匿名讨论"):
                         send()
                     self.assertEqual(len(server.posts), 4)
                     browser.close()

@@ -1,18 +1,15 @@
-import sys
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from catalog_holdings import holdings, table_rows, COPIES
-from queries import QueryUnavailable
+from tongji_cli.library.holdings import holdings, table_rows, COPIES
+from tongji_cli.common import QueryUnavailable
 
 
 class CatalogHoldingsTest(unittest.TestCase):
     def test_reads_two_separate_tables_and_the_sibling_pager(self):
-        with sync_playwright() as pw, patch("catalog_holdings.BOOK", "http://fixture.local/book/{}"):
+        with sync_playwright() as pw, patch("tongji_cli.library.holdings.BOOK", "http://fixture.local/book/{}"):
             browser = pw.chromium.launch(channel="chrome")
             try:
                 page = browser.new_page()

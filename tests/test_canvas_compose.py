@@ -1,18 +1,15 @@
 import json
-import sys
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from threading import Thread
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import queries
-from canvas_compose import send_message
-from queries import QueryUnavailable
+from tongji_cli.canvas import api as canvas_api
+from tongji_cli.canvas.compose import send_message
+from tongji_cli.common import QueryUnavailable
 
 
 class CanvasMail(BaseHTTPRequestHandler):
@@ -60,7 +57,7 @@ class ComposeTest(unittest.TestCase):
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), CanvasMail)
         Thread(target=cls.server.serve_forever, daemon=True).start()
-        cls.host = patch.object(queries, "CANVAS", f"http://127.0.0.1:{cls.server.server_port}")
+        cls.host = patch.object(canvas_api, "CANVAS", f"http://127.0.0.1:{cls.server.server_port}")
         cls.host.start()
         cls.pw = sync_playwright().start()
         cls.browser = cls.pw.chromium.launch(channel="chrome")

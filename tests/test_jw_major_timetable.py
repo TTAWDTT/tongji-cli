@@ -1,13 +1,10 @@
-import sys
 import unittest
-from pathlib import Path
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from jw_major_timetable import CALENDARS, LIST, VIEW, major_timetable
-from queries import QueryUnavailable
+from tongji_cli.jw.major_timetable import CALENDARS, LIST, VIEW, major_timetable
+from tongji_cli.common import QueryUnavailable
 
 
 class MajorTimetableTest(unittest.TestCase):

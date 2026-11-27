@@ -1,15 +1,12 @@
-from pathlib import Path
-import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import queries
-from canvas_navigation import groups, navigation
-from queries import QueryUnavailable
+from tongji_cli.canvas import api as canvas_api
+from tongji_cli.canvas.navigation import groups, navigation
+from tongji_cli.common import QueryUnavailable
 
 
 class NavigationTest(unittest.TestCase):
@@ -24,7 +21,7 @@ class NavigationTest(unittest.TestCase):
         cls.pw.stop()
 
     def setUp(self):
-        base = patch.object(queries, "CANVAS", "https://school.test")
+        base = patch.object(canvas_api, "CANVAS", "https://school.test")
         base.start()
         self.addCleanup(base.stop)
         self.page = self.browser.new_page()

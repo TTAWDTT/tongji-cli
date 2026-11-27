@@ -1,11 +1,8 @@
-import sys
 import unittest
-from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from portal_records import personal_records, tab_records
+from tongji_cli.portal.records import personal_records, tab_records
 
 
 class PortalRecordsTest(unittest.TestCase):
@@ -55,7 +52,7 @@ class PortalRecordsTest(unittest.TestCase):
                 browser.close()
 
     def test_flow_history_distinguishes_empty_error_and_visible_steps(self):
-        from portal_records import flow_history
+        from tongji_cli.portal.records import flow_history
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch(channel="chrome")

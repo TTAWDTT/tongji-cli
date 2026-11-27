@@ -1,15 +1,12 @@
-import sys
 import unittest
 from datetime import date
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from library_room_booking import day_schedule, lookup_room_receipts, room_booking
-from queries import QueryUnavailable
+from tongji_cli.library.room_booking import day_schedule, lookup_room_receipts, room_booking
+from tongji_cli.common import QueryUnavailable
 
 
 SITE = "http://rooms.local/"
@@ -85,7 +82,7 @@ class RoomBookingTest(unittest.TestCase):
     def setUp(self):
         self.ctx = self.browser.new_context()
         self.addCleanup(self.ctx.close)
-        host = patch("library_room_booking.SEATS", SITE + "history")
+        host = patch("tongji_cli.library.room_booking.SEATS", SITE + "history")
         host.start()
         self.addCleanup(host.stop)
         self.page = self.ctx.new_page()

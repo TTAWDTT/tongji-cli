@@ -1,14 +1,11 @@
-import sys
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_competitions import LIST, VIEW, competitions
-from queries import QueryUnavailable
+from tongji_cli.jw.competitions import LIST, VIEW, competitions
+from tongji_cli.common import QueryUnavailable
 
 
 HTML = """<div class="el-form-item">竞赛名称<input id="keyword"></div>

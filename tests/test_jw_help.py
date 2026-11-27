@@ -1,4 +1,3 @@
-import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -6,9 +5,8 @@ from types import SimpleNamespace
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_help import help_detail
-from queries import QueryUnavailable
+from tongji_cli.jw.help import help_detail
+from tongji_cli.common import QueryUnavailable
 
 
 class HelpDetailTest(unittest.TestCase):

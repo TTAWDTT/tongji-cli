@@ -1,13 +1,10 @@
-import sys
 import unittest
-from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import portal_apply
-from queries import QueryUnavailable
+from tongji_cli.portal import apply as portal_apply
+from tongji_cli.common import QueryUnavailable
 
 
 class PortalApplyTest(unittest.TestCase):

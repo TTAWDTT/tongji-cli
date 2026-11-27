@@ -1,12 +1,9 @@
-from pathlib import Path
-import sys
 import unittest
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from media_sessions import session_rows
+from tongji_cli.media.sessions import session_rows
 
 
 class MediaSessionTest(unittest.TestCase):

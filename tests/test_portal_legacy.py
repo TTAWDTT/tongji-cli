@@ -1,17 +1,15 @@
 import json
 from io import BytesIO
 from tempfile import TemporaryDirectory
-import sys
 import unittest
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import portal_legacy
-import portal_certificate_download as proof
-from queries import QueryUnavailable
+from tongji_cli.portal import legacy as portal_legacy
+from tongji_cli.portal import certificate_download as proof
+from tongji_cli.common import QueryUnavailable
 
 
 class LegacyPortalTest(unittest.TestCase):

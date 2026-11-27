@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tongji-cli"
+version = "0.1.0"
+description = "同济校园服务的非官方命令行工具"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "playwright==1.62.0",
+    "pypdf==6.21.4",
+]
+
+[project.scripts]
+tongji = "tongji_cli.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tongji_cli"]

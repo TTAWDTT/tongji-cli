@@ -1,20 +1,17 @@
-import sys
-import runpy
+from tongji_cli.auth import SITES, visit
+from tongji_cli.auth import visit
 import unittest
 from unittest.mock import patch
 from datetime import date
-from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from stadium import field_rows, slots, venues
-from queries import QueryUnavailable
+from tongji_cli.campus.stadium import field_rows, slots, venues
+from tongji_cli.common import QueryUnavailable
 
 
 class StadiumTest(unittest.TestCase):
     def test_saved_login_can_replace_the_login_link_before_click(self):
-        cli = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tongji"))
         with sync_playwright() as pw:
             browser = pw.chromium.launch(channel="chrome")
             try:
@@ -24,13 +21,12 @@ class StadiumTest(unittest.TestCase):
                     <button disabled>登 录</button><script>
                     setTimeout(()=>document.body.innerHTML='<button>退出</button>',500);
                     </script>"""))
-                with patch.dict(cli["SITES"], stadium=url):
-                    self.assertEqual(cli["visit"](page, "stadium", False), "authenticated")
+                with patch.dict(SITES, stadium=url):
+                    self.assertEqual(visit(page, "stadium", False), "authenticated")
             finally:
                 browser.close()
 
     def test_login_waits_for_confirmation_dialog(self):
-        cli = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tongji"))
         with sync_playwright() as pw:
             browser = pw.chromium.launch(channel="chrome")
             try:
@@ -40,8 +36,8 @@ class StadiumTest(unittest.TestCase):
                     <button onclick="setTimeout(()=>document.querySelector('[role=dialog]').hidden=false,350)">登 录</button>
                     <div role="dialog" hidden><button onclick="document.body.innerHTML='&lt;button&gt;退出&lt;/button&gt;'">
                     登 录</button></div>"""))
-                with patch.dict(cli["SITES"], stadium=url):
-                    self.assertEqual(cli["visit"](page, "stadium", False), "authenticated")
+                with patch.dict(SITES, stadium=url):
+                    self.assertEqual(visit(page, "stadium", False), "authenticated")
             finally:
                 browser.close()
 

@@ -1,14 +1,11 @@
-import sys
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_applications import DETAIL, LIST, VIEW, applications
-from queries import QueryUnavailable
+from tongji_cli.jw.applications import DETAIL, LIST, VIEW, applications
+from tongji_cli.common import QueryUnavailable
 
 
 def table(labels, body=""):
