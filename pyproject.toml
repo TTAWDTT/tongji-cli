@@ -13,6 +13,9 @@ dependencies = [
     "pypdf==6.21.4",
 ]
 
+[project.urls]
+Repository = "https://github.com/TTAWDTT/tongji-cli"
+
 [project.scripts]
 tongji = "tongji_cli.cli:main"
 
