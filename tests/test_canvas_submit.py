@@ -1,16 +1,15 @@
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import sys
 from tempfile import TemporaryDirectory
 from threading import Thread
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from playwright.sync_api import sync_playwright
-from canvas_submit import submit
-import queries
+from tongji_cli.canvas.submit import submit
+from tongji_cli.canvas import api as canvas_api
+from tongji_cli.common import QueryUnavailable
 
 
 class AssignmentSite(BaseHTTPRequestHandler):
@@ -40,7 +39,7 @@ class AssignmentSite(BaseHTTPRequestHandler):
             "/api/v1/courses": [{"id": 1, "name": "样例课程"}],
             "/api/v1/courses/1/assignments/2": {
                 "id": 2, "name": "样例作业", "submission_types": ["online_upload"], "allowed_extensions": ["pdf"],
-                "html_url": queries.CANVAS + "/courses/1/assignments/2"
+                "html_url": canvas_api.CANVAS + "/courses/1/assignments/2"
             },
             "/api/v1/courses/1/assignments/2/submissions/self": self.server.receipt,
         }
@@ -71,7 +70,7 @@ class SubmissionTest(unittest.TestCase):
             server.receipt = {"attempt": 1}
             Thread(target=server.serve_forever, daemon=True).start()
             try:
-                with patch.object(queries, "CANVAS", f"http://127.0.0.1:{server.server_port}"), sync_playwright() as pw:
+                with patch.object(canvas_api, "CANVAS", f"http://127.0.0.1:{server.server_port}"), sync_playwright() as pw:
                     browser = pw.chromium.launch(channel="chrome")
                     ctx = browser.new_context()
                     page = ctx.new_page()
@@ -89,7 +88,7 @@ class SubmissionTest(unittest.TestCase):
                     self.assertEqual(sent["attempt"], 3)
                     bad = Path(tmp) / "a.txt"
                     bad.write_text("example")
-                    with self.assertRaisesRegex(queries.QueryUnavailable, "扩展名"):
+                    with self.assertRaisesRegex(QueryUnavailable, "扩展名"):
                         submit(ctx, page, "1", 2, [bad], True)
                     self.assertEqual(server.receipt["attempt"], 3)
                     browser.close()

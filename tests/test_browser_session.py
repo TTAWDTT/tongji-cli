@@ -1,4 +1,3 @@
-import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import unittest
@@ -7,8 +6,7 @@ from tempfile import TemporaryDirectory
 
 from playwright.sync_api import expect, sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from browser_session import open_session
+from tongji_cli.browser_session import open_session
 
 
 class BrowserSessionTest(unittest.TestCase):

@@ -1,13 +1,10 @@
-from pathlib import Path
-import sys
 import unittest
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from dorm_energy import WATER, meter_balance, meter_history
-from queries import QueryUnavailable
+from tongji_cli.campus.dorm_energy import WATER, meter_balance, meter_history
+from tongji_cli.common import QueryUnavailable
 
 
 class MeterReadingTest(unittest.TestCase):

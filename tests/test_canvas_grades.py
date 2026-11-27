@@ -1,8 +1,6 @@
 import json
-import sys
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from threading import Thread
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,10 +8,10 @@ from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import queries
-from canvas_api import courses, syllabus
-from canvas_grades import grades, grading, rubric
+from tongji_cli.canvas import api as canvas_api
+from tongji_cli.common import QueryUnavailable
+from tongji_cli.canvas.api import courses, syllabus
+from tongji_cli.canvas.grades import grades, grading, rubric
 
 
 class GradeSite(BaseHTTPRequestHandler):
@@ -77,7 +75,7 @@ class GradeTest(unittest.TestCase):
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), GradeSite)
         Thread(target=cls.server.serve_forever, daemon=True).start()
-        cls.host = patch.object(queries, "CANVAS", f"http://127.0.0.1:{cls.server.server_port}")
+        cls.host = patch.object(canvas_api, "CANVAS", f"http://127.0.0.1:{cls.server.server_port}")
         cls.host.start()
         cls.pw = sync_playwright().start()
         cls.client = cls.pw.request.new_context()
@@ -104,12 +102,12 @@ class GradeTest(unittest.TestCase):
         history = courses(self.ctx, "completed")
         self.assertEqual([(c["id"], c["term"]) for c in history], [(21, "上学期"), (22, "上学期")])
         self.assertEqual([c["id"] for c in courses(self.ctx)], [1, 2, 3])
-        with self.assertRaisesRegex(queries.QueryUnavailable, "canvas courses --state completed"):
+        with self.assertRaisesRegex(QueryUnavailable, "canvas courses --state completed"):
             grades(self.ctx, "学科1", "completed")
         selected, = grades(self.ctx, "22", "completed")
         self.assertEqual(selected["marks"][0]["current_score"], 88)
         self.assertEqual(grades(self.ctx, "学科1")[0]["course_id"], 1)
-        with self.assertRaises(queries.QueryUnavailable):
+        with self.assertRaises(QueryUnavailable):
             grades(self.ctx, "22")
 
     def test_paged_groups_keep_rules_and_published_zero(self):

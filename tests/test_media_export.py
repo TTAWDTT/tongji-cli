@@ -2,7 +2,6 @@ import io
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import sys
 from tempfile import TemporaryDirectory
 from threading import Thread
 from types import SimpleNamespace
@@ -13,9 +12,8 @@ from zipfile import ZipFile
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import media_export
-from queries import QueryUnavailable
+from tongji_cli.media import export as media_export
+from tongji_cli.common import QueryUnavailable
 
 
 class ExportSite(BaseHTTPRequestHandler):

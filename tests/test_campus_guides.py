@@ -1,10 +1,7 @@
-import sys
 import unittest
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from campus_guides import clinic_hours, sports_hours
-from queries import QueryUnavailable
+from tongji_cli.campus.guides import clinic_hours, sports_hours
+from tongji_cli.common import QueryUnavailable
 
 
 class CampusGuidesTest(unittest.TestCase):
@@ -32,7 +29,7 @@ class CampusGuidesTest(unittest.TestCase):
 
     def test_balance_waits_for_amount(self):
         from playwright.sync_api import sync_playwright
-        from campus_guides import card_balance
+        from tongji_cli.campus.guides import card_balance
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch(channel="chrome")

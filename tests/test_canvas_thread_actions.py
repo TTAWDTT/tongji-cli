@@ -1,17 +1,15 @@
 import json
-import sys
 import unittest
 from http.server import ThreadingHTTPServer
-from pathlib import Path
 from threading import Thread
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import queries
-from canvas_thread_actions import reply, set_state
+from tongji_cli.canvas import api as canvas_api
+from tongji_cli.common import QueryUnavailable
+from tongji_cli.canvas.thread_actions import reply, set_state
 from test_canvas_compose import CanvasMail
 
 
@@ -81,7 +79,7 @@ class ThreadActionTest(unittest.TestCase):
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), ThreadSite)
         Thread(target=cls.server.serve_forever, daemon=True).start()
-        cls.host = patch.object(queries, "CANVAS", f"http://127.0.0.1:{cls.server.server_port}")
+        cls.host = patch.object(canvas_api, "CANVAS", f"http://127.0.0.1:{cls.server.server_port}")
         cls.host.start()
         cls.pw = sync_playwright().start()
         cls.browser = cls.pw.chromium.launch(channel="chrome")
@@ -109,7 +107,7 @@ class ThreadActionTest(unittest.TestCase):
         row, = reply(self.ctx, self.p, 21, "复核", False)
         self.assertEqual((row["message_id"], self.server.sent), (2, 1))
         self.server.post_id = 1
-        with self.assertRaisesRegex(queries.QueryUnavailable, "回复回执未核实"):
+        with self.assertRaisesRegex(QueryUnavailable, "回复回执未核实"):
             reply(self.ctx, self.p, 21, "复核", False)
         self.assertEqual(self.server.sent, 2)
 

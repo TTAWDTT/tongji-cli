@@ -1,14 +1,11 @@
-import sys
 import unittest
 from datetime import date
-from pathlib import Path
 from types import SimpleNamespace
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from library_rooms import room_directory
-from queries import QueryUnavailable
+from tongji_cli.library.rooms import room_directory
+from tongji_cli.common import QueryUnavailable
 
 
 class LibraryRoomsTest(unittest.TestCase):

@@ -1,14 +1,12 @@
-import sys
 import unittest
 from datetime import date
-from pathlib import Path
 from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_records import PAGED_QUERIES, append_record_pages, check_withdrawal, enrollment_status, personal_plan, records, TIMETABLE_QUERY
-from queries import QueryUnavailable, timetable_range
+from tongji_cli.jw.records import PAGED_QUERIES, append_record_pages, check_withdrawal, enrollment_status, personal_plan, records, TIMETABLE_QUERY
+from tongji_cli.common import QueryUnavailable
+from tongji_cli.jw.timetable import timetable_range
 
 
 class SchoolPagesTest(unittest.TestCase):
@@ -45,7 +43,7 @@ class SchoolPagesTest(unittest.TestCase):
             <table class="el-table__body"><tr><td>课设</td><td>星期五 1-2节 [1-16]</td><td>教室</td></tr></table></div>"""
         page.route("**/GraduateStudentTimeTable", lambda r: r.fulfill(content_type="text/html; charset=utf-8", body=html))
         calendar = [{"semesterName": "秋季", "beginDay": "2026-09-07", "endDay": "2027-01-17"}]
-        with patch("queries.semester_list", return_value=calendar):
+        with patch("tongji_cli.jw.timetable.semester_list", return_value=calendar):
             row, = timetable_range(page, [date(2026, 11, 27)])
         self.assertEqual([item["detail"] for item in row["items"]], ["课设"])
         self.assertTrue(row["source"].endswith("/GraduateStudentTimeTable"))

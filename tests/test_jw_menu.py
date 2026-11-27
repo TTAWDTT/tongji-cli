@@ -1,11 +1,8 @@
-import sys
 import unittest
-from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_menu import student_menu
+from tongji_cli.jw.menu import student_menu
 
 
 class MenuTest(unittest.TestCase):

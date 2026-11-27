@@ -1,13 +1,10 @@
-import sys
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from library_space import availability, reserve_seat
+from tongji_cli.library.space import availability, reserve_seat
 
 
 class AvailabilityTest(unittest.TestCase):
@@ -31,7 +28,7 @@ class AvailabilityTest(unittest.TestCase):
 
     def test_named_area_preserves_seat_numbers_and_does_not_book(self):
         from datetime import date
-        from queries import QueryUnavailable
+        from tongji_cli.common import QueryUnavailable
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch(channel="chrome")
@@ -52,9 +49,9 @@ class AvailabilityTest(unittest.TestCase):
 
     def test_reservation_checks_the_personal_receipt(self):
         from datetime import date
-        from queries import QueryUnavailable
+        from tongji_cli.common import QueryUnavailable
 
-        with sync_playwright() as pw, patch("library_space.SEATS", "http://fixture.local/records"):
+        with sync_playwright() as pw, patch("tongji_cli.library.space.SEATS", "http://fixture.local/records"):
             browser = pw.chromium.launch(channel="chrome")
             try:
                 page = browser.new_context().new_page()

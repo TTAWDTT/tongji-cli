@@ -1,15 +1,12 @@
-from pathlib import Path
 from types import SimpleNamespace
-import sys
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import media_tasks
-from queries import QueryUnavailable
+from tongji_cli.media import tasks as media_tasks
+from tongji_cli.common import QueryUnavailable
 
 
 class MediaTasksTest(unittest.TestCase):

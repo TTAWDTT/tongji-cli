@@ -1,14 +1,11 @@
 import json
-from pathlib import Path
-import sys
 import unittest
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from media_courses import COURSE_LIST, courses
-from queries import QueryUnavailable
+from tongji_cli.media.courses import COURSE_LIST, courses
+from tongji_cli.common import QueryUnavailable
 
 
 class MediaCoursesTest(unittest.TestCase):

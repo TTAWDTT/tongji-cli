@@ -1,12 +1,9 @@
-import sys
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_syllabus import CALENDARS, CATALOG, LIST, DETAIL, syllabus
-from queries import QueryUnavailable
+from tongji_cli.jw.syllabus import CALENDARS, CATALOG, LIST, DETAIL, syllabus
+from tongji_cli.common import QueryUnavailable
 
 
 HTML = """<div class="el-form-item"><label>学年学期：</label><input id="term" value="2026-2027学年第1学期" onclick="picker.hidden=false"></div>

@@ -1,17 +1,15 @@
 import json
-import sys
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from threading import Thread
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import queries
-from canvas_quizzes import quiz_detail, quiz_submission, quizzes
+from tongji_cli.canvas import api as canvas_api
+from tongji_cli.common import QueryUnavailable
+from tongji_cli.canvas.quizzes import quiz_detail, quiz_submission, quizzes
 
 
 CLASSIC = "/api/v1/courses/11/quizzes"
@@ -61,7 +59,7 @@ class QuizTest(unittest.TestCase):
             ASSIGNMENTS: [NEW_ROW, {"id": 7, "name": "其他 LTI", "submission_types": ["external_tool"]}],
             CLASSIC + "/5": CLASSIC_ROW, ASSIGNMENTS + "/5": NEW_ROW,
         }
-        origin = patch.object(queries, "CANVAS", f"http://127.0.0.1:{server.server_port}")
+        origin = patch.object(canvas_api, "CANVAS", f"http://127.0.0.1:{server.server_port}")
         origin.start()
         self.addCleanup(origin.stop)
         pw = sync_playwright().start()
@@ -157,6 +155,6 @@ class QuizTest(unittest.TestCase):
         self.assertEqual((row["engine"], row["submission_state"], row["attempt"], row["score"]), ("new", "graded", 3, 0))
         self.assertEqual({urlsplit(url).path for url in self.calls}, {"/api/v1/courses", ASSIGNMENTS + "/5", path})
         self.data[ASSIGNMENTS + "/7"] = {"id": 7, "name": "其他 LTI", "submission_types": ["external_tool"]}
-        with self.assertRaisesRegex(queries.QueryUnavailable, "不是 Canvas 新测验"):
+        with self.assertRaisesRegex(QueryUnavailable, "不是 Canvas 新测验"):
             quiz_submission(self.ctx, "11", 7, "new")
         self.assertNotIn(ASSIGNMENTS + "/7/submissions/self", self.calls)

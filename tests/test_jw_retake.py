@@ -1,14 +1,11 @@
 import json
-import sys
 import unittest
-from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_retake import retakes
-from queries import QueryUnavailable
+from tongji_cli.jw.retake import retakes
+from tongji_cli.common import QueryUnavailable
 
 
 APP = """<!doctype html><meta charset=utf-8>

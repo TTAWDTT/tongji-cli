@@ -1,14 +1,11 @@
-import sys
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_schemes import DETAIL, LIST, VIEW, scheme_table, schemes
-from queries import QueryUnavailable
+from tongji_cli.jw.schemes import DETAIL, LIST, VIEW, scheme_table, schemes
+from tongji_cli.common import QueryUnavailable
 
 
 class SchemesTest(unittest.TestCase):

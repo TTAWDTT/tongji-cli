@@ -1,22 +1,19 @@
 import io
 import json
 import os
-import runpy
-import sys
 import unittest
 from contextlib import redirect_stdout
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from threading import Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import dorm_energy
-import school_calendar
-from queries import QueryUnavailable
+from tongji_cli.display import display
+from tongji_cli.campus import dorm_energy
+from tongji_cli.campus import school_calendar
+from tongji_cli.common import QueryUnavailable
 
 
 class EnergySite(BaseHTTPRequestHandler):
@@ -77,7 +74,6 @@ class EnergyTest(unittest.TestCase):
             self.read("electricity")
 
     def test_room_labels_in_default_output(self):
-        display = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tongji"))["display"]
         with redirect_stdout(io.StringIO()) as output:
             display({"dorm": {"status": "ok", "items": [self.read("electricity")]}}, False)
         self.assertIn("宿舍楼", output.getvalue())

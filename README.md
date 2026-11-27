@@ -4,17 +4,18 @@
 
 ## 快速开始
 
-在 macOS 上安装 Google Chrome 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)，然后运行：
+在 macOS 上安装 Google Chrome 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)，然后从源码安装命令。
 
 ```sh
 git clone https://github.com/TTAWDTT/tongji-cli.git
 cd tongji-cli
-./tongji --help
-./tongji login
-./tongji week
+uv tool install .
+tongji --help
 ```
 
-首次运行时，uv 会安装脚本声明的依赖。查看特定模块的命令可运行 `./tongji canvas --help` 或 `./tongji library --help`。
+安装后可以在任意目录运行 `tongji login`、`tongji week` 或 `tongji canvas --help`。如果终端提示找不到 `tongji`，运行 `uv tool update-shell` 并重开终端，让 shell 能在 `PATH` 中找到 uv 安装的命令。
+
+也可以在仓库根目录直接运行 `./tongji --help`。这种方式运行当前工作区的代码，uv 会在首次运行时准备项目依赖。下面示例中的 `./tongji` 都可以换成安装后的 `tongji`，两种入口共用同一个登录配置。
 
 ## 登录与一周安排
 
@@ -223,5 +224,5 @@ cd tongji-cli
 本地回归使用临时服务器与 Chrome，可在本目录执行：
 
 ```sh
-uv run --with playwright==1.62.0 --with pypdf==6.21.4 python -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -v
 ```

@@ -1,13 +1,10 @@
-from pathlib import Path
-import sys
 import unittest
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_mentors import MEETING_LIST, MEETING_VIEW, MY_TUTOR, mentor_meetings, mentor_profile
-from queries import QueryUnavailable
+from tongji_cli.jw.mentors import MEETING_LIST, MEETING_VIEW, MY_TUTOR, mentor_meetings, mentor_profile
+from tongji_cli.common import QueryUnavailable
 
 
 class MentorTest(unittest.TestCase):

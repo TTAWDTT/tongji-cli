@@ -1,16 +1,13 @@
-import sys
 import unittest
 from datetime import datetime
 from html import escape
-from pathlib import Path
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_personal_changes import personal_change
-from jw_records import PAGED_QUERIES
-from queries import QueryUnavailable, SHANGHAI
+from tongji_cli.jw.personal_changes import personal_change
+from tongji_cli.jw.records import PAGED_QUERIES
+from tongji_cli.common import QueryUnavailable, SHANGHAI
 
 
 TERM = "2026-2027学年第1学期"

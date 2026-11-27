@@ -1,14 +1,11 @@
-from pathlib import Path
-import sys
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import dorm_energy
-from queries import QueryUnavailable
+from tongji_cli.campus import dorm_energy
+from tongji_cli.common import QueryUnavailable
 
 
 class MeterLocationsTest(unittest.TestCase):

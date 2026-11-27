@@ -2,8 +2,8 @@ import unittest
 
 from playwright.sync_api import sync_playwright
 
-import notices
-from queries import QueryUnavailable
+from tongji_cli.campus import notices
+from tongji_cli.common import QueryUnavailable
 
 
 class NoticeTests(unittest.TestCase):

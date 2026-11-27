@@ -1,14 +1,11 @@
-import sys
 import unittest
-from pathlib import Path
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jw_progress import DETAIL, read_detail
-from jw_records import watch_query
-from queries import QueryUnavailable
+from tongji_cli.jw.progress import DETAIL, read_detail
+from tongji_cli.jw.records import watch_query
+from tongji_cli.common import QueryUnavailable
 
 
 class ProgressTest(unittest.TestCase):

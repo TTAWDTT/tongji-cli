@@ -1,15 +1,12 @@
-import sys
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from library_space import availability
-from library_study import reserve_study
-from queries import QueryUnavailable
+from tongji_cli.library.space import availability
+from tongji_cli.library.study import reserve_study
+from tongji_cli.common import QueryUnavailable
 from test_library_space import sample_area
 
 
@@ -120,7 +117,7 @@ class StudySeatsTest(unittest.TestCase):
         a=self.args
         a.preview=False
         stored.extend([("001","2025-11-01 至 2025-11-30"),("01","2026-11-01 至 2026-11-30")])
-        with patch("library_study.SEATS","http://fixture.local/history"):
+        with patch("tongji_cli.library.study.SEATS","http://fixture.local/history"):
             with self.assertRaisesRegex(QueryUnavailable,"未核实"):
                 reserve_study(self.page,a,handoff=lambda row: None)
             row,=reserve_study(self.page,a,handoff=lambda row: stored.append(("001","2026-11-01 至 2026-11-30")))
