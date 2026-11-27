@@ -2,7 +2,7 @@ import unittest
 from datetime import date
 from unittest.mock import Mock, patch
 from tempfile import TemporaryDirectory
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, Error
 from tongji_cli.browser_session import open_session
 from tongji_cli import chaoxing
 from tongji_cli.common import QueryUnavailable
@@ -36,6 +36,31 @@ class ValuesTest(unittest.TestCase):
         self.assertEqual(result['undated_assignments'][0]['title'],'unknown')
         self.assertEqual(result['items'][1]['chaoxing_assignments'][0]['title'],'in')
         self.assertNotIn('assignments',result['items'][0])
+
+    def test_http_errors_and_content_type_are_checked(self):
+        for status, kind in [(503, 'text/html'), (200, 'application/json')]:
+            context = Mock()
+            context.request.get.return_value = Mock(status=status, ok=status == 200,
+                url='https://i.chaoxing.com/base', headers={'content-type': kind})
+            with self.assertRaises(QueryUnavailable):
+                chaoxing.read(context, 'https://i.chaoxing.com/base')
+
+    def test_transport_error_is_sanitized(self):
+        context = Mock()
+        context.request.get.side_effect = Error('request failed secret-cookie-value')
+        with self.assertRaisesRegex(QueryUnavailable, '连接失败') as error:
+            chaoxing.read(context, 'https://i.chaoxing.com/base')
+        self.assertNotIn('secret', str(error.exception))
+
+    def test_external_redirect_is_not_requested(self):
+        context = Mock()
+        context.request.get.return_value = Mock(status=302, headers={'location': 'https://evil.org/path'})
+        with self.assertRaises(QueryUnavailable):
+            chaoxing.read(context, 'https://i.chaoxing.com/base')
+        self.assertEqual(context.request.get.call_count, 1)
+
+    def test_single_digit_calendar_fields(self):
+        self.assertEqual(chaoxing.deadline('截止时间:2026/2/3 9:05'), '2026-02-03T09:05:00+08:00')
 
 class BrowserParsingTest(unittest.TestCase):
     @classmethod
@@ -75,5 +100,41 @@ class BrowserParsingTest(unittest.TestCase):
         rows=[{'id':'1:2','course_id':'1','title':'甲'},{'id':'1:3','course_id':'1','title':'甲'}]
         with patch.object(chaoxing,'courses',return_value=rows):
             with self.assertRaisesRegex(QueryUnavailable,'不唯一'):chaoxing.assignments(None,self.page,'甲')
+
+    def test_malformed_course_identity_is_not_silently_skipped(self):
+        html = '<a href="stucoursemiddle?courseid=1&amp;clazzid=2" title="课程甲">课程甲</a>'
+        with patch.object(chaoxing, 'read', side_effect=["var fid = '123';", html]):
+            with self.assertRaisesRegex(QueryUnavailable, '标识'):
+                chaoxing.courses(None, self.page)
+
+    def test_failed_details_keep_listed_assignment(self):
+        course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'课程甲'}
+        work='<li data="https://mooc1.chaoxing.com/mooc2/work/task?workId=9"><p class="overHidden2">报告</p><p class="status">未完成</p></li>'
+        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=['<input id="workEnc" value="fixture">',work,QueryUnavailable('详情暂不可用')]):
+            result=chaoxing.assignments(None,self.page)
+        self.assertEqual(result['status'],'partial')
+        self.assertEqual(result['items'][0]['title'],'报告')
+        self.assertFalse(result['items'][0]['submitted'])
+        self.assertEqual(result['items'][0]['detail_status'],'unverified')
+        self.assertEqual(result['errors'][0]['id'],'1:2:9')
+
+    def test_blank_selector_does_not_query_all_courses(self):
+        with patch.object(chaoxing,'courses',return_value=[]):
+            with self.assertRaisesRegex(QueryUnavailable, '不能为空'):
+                chaoxing.assignments(None,self.page,' ')
+
+    def test_pagination_is_not_reported_as_complete(self):
+        with patch.object(chaoxing,'read',side_effect=["var fid = '123';",'<a rel="next" href="?page=2">下一页</a>']):
+            with self.assertRaisesRegex(QueryUnavailable, '下一页'):
+                chaoxing.courses(None,self.page)
+
+    def test_wrong_course_link_is_rejected(self):
+        course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'课程甲'}
+        work='<li data="https://mooc1.chaoxing.com/mooc2/work/task?workId=9&amp;courseId=99"><p class="overHidden2">报告</p><p class="status">未完成</p></li>'
+        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=['<input id="workEnc" value="fixture">',work]) as read:
+            result=chaoxing.assignments(None,self.page)
+        self.assertEqual(result['status'],'partial')
+        self.assertEqual(result['items'],[])
+        self.assertEqual(read.call_count,2)
 
 if __name__=='__main__':unittest.main()
