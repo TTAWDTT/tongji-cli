@@ -7,19 +7,39 @@ description: 使用 tongji 查询同济大学教务课表、Canvas 作业、录�
 
 PyPI 包名为 `tongji-cli`，终端命令为 `tongji`。先用 `tongji --help` 核对入口；缺少命令时可用 `uv tool install tongji-cli` 或 `pipx install tongji-cli`。在用户的工作目录里调用安装版即可。下文的 `$course_id` 等变量表示从上一步结果或用户请求取得的值，日期用 YYYY-MM-DD。按任务选择一条路径，不必依次执行每个示例。
 
-## 从用户的问题选入口
+## CLI 提供的业务原子操作
 
-| 用户要做什么 | 从哪里开始 | 容易影响答案的区别 |
+用户已经指定对象、动作和范围时，直接调用对应命令。例如“查这门课的总评”只需一次成绩查询。“把这个 PDF 交到这份作业”也是一个业务动作：提交命令负责上传、提交和核对回执。Agent 负责在调用前选对课程、作业和文件。
+
+下表按输入和结果选命令。示例中的 ID 来自对应站点。查询返回的 ID 可以作为下一次操作的输入；用户需求已经满足时即可停止。
+
+| 对象与动作 | 调用示例 | 结果能说明什么 |
 | --- | --- | --- |
-| 排一周日程 | `tongji week --json` | 从上海日期今天起滚动七天；它只合并个人排课和普通作业截止项 |
-| 查本周或下周课表 | `tongji jw timetable --week this --json` | 周一至周日；下一个自然周用 `--week next`。只看今天的课和作业用 `tongji today --json` |
-| 查待办、逾期或成绩 | Canvas 的 assignments、planner、grades | 学校教务成绩用 `tongji jw grades --json`；Canvas 总评、作业评分和教务成绩各有来源 |
-| 找课件、回放、字幕 | Canvas 课程材料或教学媒体平台 | 教师上传的文件从 Canvas 找；按课次导出智播课件、语音原文和译文从 media 找 |
-| 找公告、表格或办件 | 公开 notices、教务 jw notices、一网通办 service | 校园官网、本人教务通知和个人审批记录的可见范围不同 |
-| 找自习地点 | library 或 rooms | 图书馆按座号或预约空间查询；教学楼教室另有公开状态和排课目录 |
-| 查出行、运动、校医院或费用 | bus、sports、clinic、card、dorm | 定班车给计划时刻，体育预约给可选场次，一卡通和宿舍计量分别查 |
+| 个人课表，指定自然周 | `tongji jw timetable --week this --json` 或 `tongji jw timetable --week next --json` | 本周或下周一至周日的排课、节次和原表地点 |
+| 校历，指定日期 | `tongji calendar week "$day" --json` | 当天属于哪个学期、第几教学周 |
+| 教务成绩 | `tongji jw grades --json` | 教务系统公布的成绩。Canvas 的课程总评从该课程的 grades 读取 |
+| Canvas 普通作业，指定截止窗口 | `tongji canvas assignments --next 7d --json` | 未来七个上海日期内截止的普通作业及本人提交状态 |
+| Canvas 学习计划，指定起点和天数 | `tongji canvas planner --from "$start" --next 7d --json` | 窗口内的计划条目，含类型、计划时间和可取得的截止时间 |
+| 一份作业，读取或提交 | `canvas assignment show` 读要求，`canvas assignment submit` 提交，`canvas submission` 读本人记录 | 三个动作各有结果。submit 成功时返回该次回执，submission 还可用来查历史或核对不确定的结果 |
+| 教学媒体课程与课次 | `media courses` 按课程名检索，`media sessions` 按媒体课程 ID 列课次，`media export` 按课次 ID 导出 | 课程目录、课次播放入口、下载文件分别对应不同请求 |
+| 图书馆资源 | `library holdings` 取书目的逐册馆藏，`library seats list` 取指定区域座号，`library rooms slots` 取指定房间时段 | 可借复本、可选座号、符合时长的空档是三种独立结果 |
+| 公告与办理 | `notices show` 按原文 URL 读公开公告，`jw notices show` 按编号读本人教务公告，`service certificate download` 按订单号下载已签发证明 | 公告要注明来源；下载已有证明只产生本地文件 |
+| 班车或地铁短驳 | `tongji bus next --from 嘉定 --to 四平 --json` 或 `tongji bus shuttle --line 14 --from 封浜 --json` | 对应方向的计划班次、上车点和校方调整说明。实时车辆位置需要另外的证据 |
+| 校医院 | `tongji clinic hours --department "$department" --json` 或 `tongji clinic guide --json` | 指定科室安排或校方挂号流程，保留机构和原指南 |
+| 一卡通 | `tongji card balance --json` 或 `tongji card transactions --from "$start" --to "$end" --json` | 本人当前余额或指定区间流水，按用户需要披露相应字段 |
 
-## 登录、权限和失败结果
+命令简写均以 `tongji` 开头。其他业务的完整参数见下方任务示例。对于续借、提交、预约等写操作，CLI 负责各自的业务校验和回执核对；agent 根据用户的请求决定是否进入写入步骤。
+
+## CLI 已有的固定组合命令
+
+| 快捷命令 | 时间范围 | 固定包含 |
+| --- | --- | --- |
+| `tongji today --json` | 上海日期今天 | 教务个人排课、Canvas 当天截止的普通作业 |
+| `tongji week --json` | 从今天起连续七个上海日期 | 个人排课和普通作业截止项，按日合并 |
+
+“未来七天的课表和到期作业”与 `week` 的覆盖范围一致，一次调用就够了。“下周有哪些待办”涉及不同的日期和事项类型，按下方的日程示例组合。两个快捷命令直接沿用现有 CLI 接口。
+
+## 会话与结果约定
 
 - 沿用环境中的 `TONGJI_BROWSER`。Chrome 和 Chromium 各用自己的校园登录配置。同一配置下的浏览器命令顺序执行，避免争用专用窗口。遇到配置正被占用的提示，等前一条命令结束再查。
 - `tongji status --json` 默认检查 Canvas 和教务。单站示例是 `tongji status --site canvas --json`。其余站点名为 `jw`（教务）、`media`（录课）、`service`（一网通办）、`library`（借阅）、`space`（空间预约）、`stadium`（体育）、`card`（一卡通）。公开查询可直接执行。
@@ -34,7 +54,22 @@ PyPI 包名为 `tongji-cli`，终端命令为 `tongji`。先用 `tongji --help` 
 | 某字段为 `null`，或课程隐藏总评 | 用“未提供”“提交状态待核实”或“教师隐藏了总评”；保留真正的零分和零条记录 |
 | `unverified` 或 `unreachable` | 报告未核实的来源及原因；办理类命令先查回执，避免重复提交 |
 
-## 教务、校历与公告
+## Agent 如何组合任务
+
+下面各节是自然语言任务的处理示例。根据用户给出的对象、日期、输出形式决定需要哪几步。已知对象 ID 时可以直接取详情；从“查一下”进入申请、发送、提交或预约，须有用户对该动作的授权。
+
+### 看未来七天、下一个自然周或全部待办
+
+- **“未来七天课表和作业”**：用固定快捷命令 `tongji week --json`。如用户还关心测验和讨论，再查 `tongji canvas planner --next 7d --json`。相同课程和作业在两边重复出现时合并展示。比较时看课程、条目类型和 ID，保留计划时间与截止时间各自的含义。
+- **“下周一到周日，上什么课、有哪些学习安排？”**：以 Asia/Shanghai 算出下周一的 ISO 日期作为 `$start`，查下面两条。课表按教学日组织；planner 按 `scheduled` 选取条目，回答“何时截止”时读 `due`，缺失就说明尚无截止时间。若要穷举一门课程的到期作业，从该课程作业列表按 `due` 筛选目标区间。
+- **“还有哪些没做？”**：先确定问的是当周安排、逾期作业，还是包括教学媒体任务。逾期普通作业可直接查 `tongji canvas assignments --overdue --json`。若请求覆盖媒体平台，再查对应学期未完成任务，按平台给出的起止时间筛选。答复写清已查的来源，保留部分成功的结果。
+
+```sh
+tongji jw timetable --week next --json
+tongji canvas planner --from "$start" --next 7d --json
+```
+
+### 查教务安排、申请与公告
 
 “下周哪天有课”可直接查个人课表；“下周是第几教学周”查 `tongji calendar week --json` 并可追加目标日期。多时段或调教室的课保留原表的周次和地点说明。校历标为工作日时，调上哪天的课仍要看排课或调课公告。
 
@@ -50,7 +85,7 @@ PyPI 包名为 `tongji-cli`，终端命令为 `tongji`。先用 `tongji --help` 
 
 例如用户问“公告里讲座改到哪儿了”，先搜与活动相关的标题，再打开原文核对活动名、发布日期和场地。若只有时间得到确认，先给时间和原公告链接，地点写“暂未确认”。检索只覆盖所选来源和页数时，答复也保留这个范围。
 
-## Canvas 课程、作业与反馈
+### Canvas 课程、作业与反馈
 
 **先确定课程和范围。** 用 `tongji canvas courses --json` 查在读课；查往期课用 `--state completed`，按学期、名称选课程 ID。后续支持该选项的命令也要带上它。小组共享文件、公告和讨论使用 `tongji canvas groups --json` 给出的组 ID 和 `--group`。不同平台的课程 ID 分别从各自目录取得。
 
@@ -96,7 +131,7 @@ tongji canvas conversation show "$conversation_id" --json
 
 后两条用于核对已发送记录。用户只问“老师说了什么”时，读已有公告、会话或讨论就能回答。同一段文字发给个人、回复整个会话和发表到小组讨论区，接收范围各不相同。
 
-## 讲义、录课和语音稿
+### 讲义、录课和语音稿
 
 “找老师上传的讲义”从 `tongji canvas materials --course "$course_id" --json` 按模块顺序查，文件用 `tongji canvas file download "$file_id" --course "$course_id" --output "$new_file" --json`。往期课程在两步都加 `--state completed`。模块页正文可用目录给出的 slug 查询。
 
@@ -110,7 +145,7 @@ tongji media export "$session_id" --course "$media_course_id" --include slides -
 
 若只要链接，返回该课次的播放页即可。只要课件时省略 `--include`，输出用新 `.pptx` 路径；含语音原文或译文时用 `.docx`，需要译文再加 `--include translation`。输出目录须已存在，校方提示“暂无课件内容”时保留该结果。任务页另用 `tongji media terms --json` 取媒体平台学期代码，再用 `tongji media tasks --term "$media_term" --kind required --status 未完成 --json` 查必做项。
 
-## 图书馆的书、座位与房间
+### 图书馆的书、座位与房间
 
 **借阅。** `tongji library hours "$campus" --json` 查常规开放时间，节假日再核对馆方通知。用 `tongji library search "$keyword" --json` 找书目，再用 `tongji library holdings "$book_id" --json` 查各馆可借复本、索书号和单册状态。本人在借用 `tongji library loans --json`，历史借阅加 `--history`。用户要续借时，从在借记录取条码和原应还日，用 `tongji library renew "$barcode" --due "$due" --preview --json` 核对。同一条码的新应还日晚于原日期才算续借成功。
 
@@ -138,23 +173,18 @@ tongji library rooms receipts --json
 
 从 slots 同时核对开放时段、空档、最短时长及人数上下限。正式申请时由用户在校方窗口填完并提交，再按回车核对回执；向用户照录“待审核”“已通过”等实际状态。
 
-## 办事大厅、证明和表格
+### 办事大厅、证明和表格
 
 - 用户问“在读证明怎么办”，用 `tongji service find 在读证明 --json` 查公开指南和本人可见的门户事项。给出适用人群、步骤及官方入口，说明其中哪些来源可读。
 - 用户要办某项业务，按 find 的来源、事项全名和模板核对预览，例如 `tongji service apply "$title" --source portal --template "$template" --preview --json` 适用于旧门户电子证明模板。办理后用 `tongji service applications --with-flow --json` 查本人办件和审批进度。
 - 用户要找已经签发的证明，先用 `tongji service certificates --json` 取得本人订单号，再用 `tongji service certificate download "$receipt" --output "$new_pdf" --json` 保存指定 PDF。下载已有证明可直接走这条路径。
 - 用户要空白表格，用 `tongji service forms "$keyword" --json` 搜研究生院下载目录，`tongji service form "$url" --json` 看说明和附件。教务学籍管理表格另用 `tongji jw forms list student-status --search "$keyword" --json`。附件名取自详情，输出到用户指定的新文件路径。
 
-## 交通、教室和个人校园服务
+### 找自习教室、订体育场地或查宿舍水电
 
-| 场景 | 操作与返回范围 |
-| --- | --- |
-| 校区间班车或地铁短驳 | `tongji bus next --from 嘉定 --to 四平 --json` 查定班车；`tongji bus shuttle --line 14 --from 封浜 --json` 查地铁短驳。返回方向、计划时刻、上车点和调整公告。回答“车到哪了”时说明可查的是计划班次 |
-| 找能自习的教室 | `tongji rooms search "$keyword" --json` 取得校方完整教室名，`tongji rooms status "$room_name" --json` 看公开状态。按楼栋编号查询目录和排课需要学校开放平台授权及 `TONGJI_OPEN_TOKEN`；排课空档只能说明计划占用情况 |
-| 体育场馆 | `tongji sports venues --campus 四平 --venue 网球 --json` 取平台场馆名，`tongji sports slots --venue "$venue" --date "$day" --json` 查具体场地和时段。用户要下单时先预览金额；正式下单由本人在平台完成，用 `tongji sports orders --json` 核对新增订单 |
-| 校医院 | `tongji clinic hours --department "$department" --json` 查科室开放安排，`tongji clinic guide --json` 查校方挂号流程，保留机构、时间和原指南 |
-| 一卡通 | `tongji card balance --json` 查本人余额，`tongji card transactions --from "$start" --to "$end" --json` 查区间流水。回答余额或区间汇总时按用户需要展示相应字段 |
-| 宿舍水电 | `tongji dorm locations --json` 列计量系统，依次加 `--campus`、`--building` 取得楼栋和楼层原名。用 `tongji dorm electricity --meter "$system" "$building" "$floor" "$room" --json` 查指定电表余额，`dorm usage` 查逐日用量；水表用 `dorm water` 和 `dorm water-usage`。保留单位和校方记录时间。未提供本人房间时先补齐位置；省略电表位置的开放平台路径需要另行授权 |
+- **教室。** 用 `tongji rooms search "$keyword" --json` 取校方完整教室名，再用 `tongji rooms status "$room_name" --json` 看公开状态。楼栋目录和排课需要学校开放平台授权及 `TONGJI_OPEN_TOKEN`；用排课信息回答时，只能确认计划占用情况。
+- **场馆。** 用 `tongji sports venues --campus 四平 --venue 网球 --json` 取场馆名，再用 `tongji sports slots --venue "$venue" --date "$day" --json` 查具体场地和时段。用户只问有哪些场次时即可返回。要下单时先预览金额，由本人在平台完成下单，用 `tongji sports orders --json` 核对新增订单。
+- **水电。** `tongji dorm locations --json` 列计量系统，依次加 `--campus`、`--building` 取得楼栋和楼层原名。用 `tongji dorm electricity --meter "$system" "$building" "$floor" "$room" --json` 查指定电表余额；逐日电量用 `dorm usage`，水表用 `dorm water` 和 `dorm water-usage`。保留单位和校方记录时间。缺少本人房间时先补齐位置；省略电表位置的开放平台路径需要另行授权。
 
 ## 把结果交还给用户
 
