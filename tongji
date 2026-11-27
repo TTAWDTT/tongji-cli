@@ -1,0 +1,932 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["playwright==1.62.0", "pypdf==6.21.4"]
+# ///
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from playwright.sync_api import Error, TimeoutError as BrowserTimeout, sync_playwright
+
+import canvas_api
+import media_courses
+import school_calendar
+from browser_session import PROFILE, open_session
+from queries import QueryUnavailable, SHANGHAI, assignments, timetable, timetable_range
+
+SITES = {
+    "canvas": "https://canvas.tongji.edu.cn/courses",
+    "jw": "https://1.tongji.edu.cn/workbench",
+    "service": "https://all.tongji.edu.cn/",
+    "library": "https://www.lib.tongji.edu.cn/my/home/dashboard",
+    "space": "https://space.tongji.edu.cn/",
+    "card": "https://yikatong.tongji.edu.cn/",
+    "stadium": "https://stadium.tongji.edu.cn/pc/#/Venue/1",
+    "media": media_courses.ENTRY,
+}
+
+
+def observe(page, site):
+    host = urlsplit(page.url).hostname
+    if host == "iam.tongji.edu.cn":
+        return "login_required"
+    if host != urlsplit(SITES[site]).hostname:
+        return "unverified"
+    if site == "media":
+        return "authenticated" if page.get_by_text("我的课程", exact=True).first.is_visible() else "unverified"
+    if site == "service":
+        portal = page.frame_locator('iframe[src*="CUS_TEMPLATE_TONGJI"]')
+        return "authenticated" if portal.locator('#stepThree input[placeholder*="事项"]').is_visible() else "unverified"
+    if site == "stadium":
+        if page.get_by_text("退出", exact=True).filter(visible=True).count():
+            return "authenticated"
+        return "login_required" if page.get_by_text(re.compile(r"^\s*登\s*录\s*$")).filter(visible=True).count() else "unverified"
+    if site == "card":
+        if page.get_by_role("link", name="个人中心", exact=True).is_visible():
+            return "authenticated"
+        return "login_required" if page.get_by_role("link", name="统一认证登陆").is_visible() else "unverified"
+    if site == "space":
+        return "authenticated" if page.get_by_text("我的中心", exact=True).first.is_visible() else "unverified"
+    if site == "library":
+        if page.get_by_text("登录统一身份认证", exact=True).first.is_visible():
+            return "login_required"
+        return "authenticated" if page.get_by_role("link", name="图书借阅", exact=True).is_visible() else "unverified"
+    if site == "canvas":
+        if page.locator("#global_nav_profile_link").is_visible() and page.locator("#content").is_visible():
+            return "authenticated"
+    else:
+        if page.get_by_text(re.compile(r"^(退出登录|安全退出|个人课表|我的课表|我的选课)$")).filter(visible=True).count():
+            return "authenticated"
+        if page.get_by_text(re.compile(r"^(统一身份认证登录|统一身份认证|登录)$")).first.is_visible():
+            return "login_required"
+    return "unverified"
+
+
+def visit(page, site, interactive):
+    if site == "space" and not interactive:
+        page.set_viewport_size({"width": 1280, "height": 720})
+    try:
+        page.goto(SITES[site], wait_until="commit", timeout=30000)
+    except Error:
+        if observe(page, site) != "login_required":
+            return "unreachable"
+    deadline = time.monotonic() + (600 if interactive else 12)
+    login_seen = None
+    opened_sso = False
+    stadium_menu_open = False
+    while time.monotonic() < deadline:
+        state = observe(page, site)
+        if state == "login_required":
+            if (interactive and site == "library" and not opened_sso
+                    and urlsplit(page.url).hostname == urlsplit(SITES["library"]).hostname):
+                page.get_by_text("登录统一身份认证", exact=True).first.click()
+                opened_sso = True
+            elif site == "stadium" and not opened_sso and urlsplit(page.url).hostname == urlsplit(SITES[site]).hostname:
+                login = re.compile(r"^\s*登\s*录\s*$")
+                dialog = page.locator('[role=dialog]:visible').get_by_text(login)
+                if dialog.filter(visible=True).count():
+                    dialog.filter(visible=True).last.click()
+                    opened_sso = True
+                    login_seen = None
+                    continue
+                if not stadium_menu_open:
+                    try:
+                        page.get_by_text(login).filter(visible=True).first.click(timeout=1200)
+                    except BrowserTimeout:
+                        if observe(page, site) == "login_required":
+                            raise
+                        continue
+                    stadium_menu_open = True
+                    continue
+            elif site == "card" and not opened_sso and urlsplit(page.url).hostname == urlsplit(SITES["card"]).hostname:
+                page.get_by_role("link", name="统一认证登陆").click()
+                opened_sso = True
+                login_seen = None
+                continue
+            if login_seen is None:
+                login_seen = time.monotonic()
+        else:
+            login_seen = None
+        if state == "authenticated" or (not interactive and login_seen is not None and time.monotonic() - login_seen >= 3):
+            return state
+        page.wait_for_timeout(500)
+    return observe(page, site)
+
+
+def duration(raw):
+    match = re.fullmatch(r"([1-9][0-9]{0,2})d", raw)
+    if not match:
+        raise argparse.ArgumentTypeError("请使用 1d 至 999d，例如 7d")
+    return int(match[1])
+
+
+def arguments():
+    import bus
+    import campus_guides
+    import library_services
+    import notices
+    from jw_competitions import LEVELS
+    shared = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    shared.add_argument("--json", action="store_true")
+    options, argv = shared.parse_known_args()
+    parser = argparse.ArgumentParser(description="同济校园查询；所有命令均支持 --json")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("login", "status"):
+        cmd = commands.add_parser(name)
+        cmd.add_argument("--site", choices=["all", *SITES], help="默认检查教务和 Canvas；all 包括一网通办、图书馆、空间预约、一卡通、体育场馆和教学媒体平台")
+    commands.add_parser("today", help="今日课表、今日截止作业")
+    commands.add_parser("week", help="未来七个上海日期的课表和作业")
+    jw = commands.add_parser("jw").add_subparsers(dest="operation", required=True)
+    menu = jw.add_parser("menu", help="从本人的教务侧栏查入口和完整菜单路径")
+    menu.add_argument("--section", help="只列出指定的一级菜单")
+    menu.add_argument("--search", help="按名称或菜单路径搜索")
+    announcements = jw.add_parser("notices", help="查看本人教务工作台的通知公告").add_subparsers(dest="action", required=True)
+    announcements.add_parser("list").add_argument("--search", help="在全部公告标题中搜索")
+    announcements.add_parser("show").add_argument("id", type=int, help="教务公告编号")
+    image = announcements.add_parser("image", help="保存公告中的一张原图")
+    image.add_argument("id", type=int, help="教务公告编号")
+    image.add_argument("--index", type=int, required=True, help="show 返回的图片序号，从 1 开始")
+    image.add_argument("--output", required=True, help="新文件路径")
+    applications = jw.add_parser("applications", help="查询教务工作台“我的申请”").add_subparsers(dest="action", required=True)
+    applications.add_parser("list", help="查看本人申请及当前审批状态")
+    applications.add_parser("show", help="读取指定申请的详情和审批进度").add_argument("number", help="列表中的完整申请编号")
+    mentors = jw.add_parser("mentors", help="查本人的导师资料和新生见面会").add_subparsers(dest="action", required=True)
+    profile = mentors.add_parser("profile", help="按新生、学院或互选导师入口查看本人导师")
+    profile.add_argument("kind", choices=["freshman", "college", "mutual"])
+    mentors.add_parser("meetings", help="列出新生导师见面会的时间和地点")
+    guides = jw.add_parser("help-center", help="查教务帮助中心的指南、常见问题和附件").add_subparsers(dest="action", required=True)
+    guides.add_parser("list", help="列出教务帮助主题").add_argument("--search", help="按主题关键词筛选")
+    guides.add_parser("show", help="查看正文和附件编号").add_argument("id", type=int, help="帮助条目编号")
+    guide_file = guides.add_parser("download", help="保存指定帮助条目的附件原件")
+    guide_file.add_argument("id", type=int, help="帮助条目编号")
+    guide_file.add_argument("--attachment", type=int, required=True, help="show 返回的附件编号")
+    guide_file.add_argument("--output", required=True, help="新文件路径")
+    graduation = jw.add_parser("graduation", help="查看毕业设计安排").add_subparsers(dest="action", required=True)
+    graduation.add_parser("defenses", help="查教务公布给本人的课题、答辩时间和地点")
+    from jw_graduation import TASK_STATES
+    tasks = graduation.add_parser("tasks", help="查毕业设计任务书目录及状态")
+    tasks.add_argument("--year", type=int, help="四位课题年份")
+    tasks.add_argument("--title", help="按课题名称筛选")
+    tasks.add_argument("--advisor", help="使用教务页面的导师筛选框")
+    tasks.add_argument("--state", choices=list(TASK_STATES), help="任务书状态")
+    tasks.add_argument("--page", type=int, default=1, help="从 1 开始的目录页码")
+    forms = jw.add_parser("forms", help="查学籍表格与毕业设计文件").add_subparsers(dest="action", required=True)
+    form_list = forms.add_parser("list", help="列出指定目录的表格与手册")
+    form_list.add_argument("--search", help="按文件名或说明筛选")
+    form_file = forms.add_parser("download", help="保存所选校方文件")
+    for sub in (form_list, form_file):
+        sub.add_argument("catalog", choices=["student-status", "graduation"], help="学籍管理或毕业设计")
+    form_file.add_argument("id", help="所选目录返回的文件编号")
+    form_file.add_argument("--output", required=True, help="新文件路径")
+    schemes = jw.add_parser("schemes", help="查询教务“我的培养方案”").add_subparsers(dest="action", required=True)
+    schemes.add_parser("list", help="列出可选方案和编号")
+    scheme = schemes.add_parser("show", help="读取方案的章节、学分要求与各学期教学安排")
+    scheme.add_argument("id", help="schemes list 返回的方案 ID")
+    scheme.add_argument("--chapter", help="只读指定章节，填写完整章节名")
+    figure = schemes.add_parser("image", help="保存指定章节内的原图")
+    figure.add_argument("id")
+    figure.add_argument("--chapter", required=True, help="show 返回的章节名")
+    figure.add_argument("--index", type=int, required=True, help="本章图片序号，从 1 开始")
+    figure.add_argument("--output", required=True, help="新文件路径")
+    progress = jw.add_parser("progress", help="查询本人课程的教学进度").add_subparsers(dest="action", required=True)
+    progress_list = progress.add_parser("list", help="查看教学班、任课教师、调课与进度状态")
+    progress_list.add_argument("--search", help="按课程名称、课程编号或任课教师筛选")
+    progress_show = progress.add_parser("show", help="查看指定进度记录的授课安排及答疑信息")
+    progress_show.add_argument("id", help="progress list 返回的进度记录 ID")
+    for sub in (progress_list, progress_show):
+        sub.add_argument("--term", help="例如 2025-2026第2学期，默认使用教务当前学期")
+    competitions = jw.add_parser("competitions", help="查询创新创业竞赛目录及学校列出的获奖等级")
+    competitions.add_argument("keyword", nargs="?", default="", help="竞赛名称关键词")
+    competitions.add_argument("--level", choices=list(LEVELS))
+    competitions.add_argument("--valid", choices=["是", "否"])
+    competitions.add_argument("--page", type=int, default=1)
+    syllabi = jw.add_parser("syllabus", help="查教务系统发布的课程教学大纲").add_subparsers(dest="action", required=True)
+    search = syllabi.add_parser("search", help="按课程编码、代码或名称搜索大纲目录")
+    search.add_argument("keyword", nargs="?", default="")
+    search.add_argument("--page", type=int, default=1)
+    detail = syllabi.add_parser("show", help="查看指定课程大纲的正文、考核及教材")
+    detail.add_argument("keyword", metavar="课程编码或代码")
+    detail.add_argument("--id", help="同一课程有多份大纲时指定大纲编号")
+    for sub in (search, detail):
+        sub.add_argument("--term", help="完整学期名，默认使用教务页面当前学期")
+    major = jw.add_parser("major-timetable", help="查本人所在专业的学期课表")
+    major.add_argument("--term", help="默认教务当前学期，例如 2025-2026第2学期")
+    major.add_argument("--search", help="匹配校方排课文字中的课程、教师或教室")
+    tt = jw.add_parser("timetable").add_mutually_exclusive_group()
+    tt.add_argument("--today", action="store_true")
+    tt.add_argument("--week", choices=["this", "next"])
+    plan = jw.add_parser("plan", help="查询个人培养计划的课程明细")
+    export = plan.add_subparsers(dest="action").add_parser("export", help="导出校方原始培养计划压缩包")
+    export.add_argument("--output", required=True, help="新建 ZIP 文件路径")
+    enrollment = jw.add_parser("enrollment", help="个人选课入口状态与申请结果").add_subparsers(dest="action", required=True)
+    enrollment.add_parser("status", help="核对个人选课页面当前显示的状态")
+    enrollment.add_parser("requests", help="查看个人选课申请和学校回复")
+    enroll = enrollment.add_parser("apply", help="在教务页由本人选课，完成后核对个人课表")
+    enroll.add_argument("code", metavar="新课程序号")
+    enroll.add_argument("--term", required=True, help="教务页面的完整学期名")
+    enroll.add_argument("--preview", action="store_true")
+    retakes = jw.add_parser("retakes", help="查询本学期重考窗口及个人课程").add_subparsers(dest="action")
+    apply = retakes.add_parser("apply", help="按新课程序号申请一门重考")
+    apply.add_argument("code", metavar="新课程序号")
+    apply.add_argument("--preview", action="store_true", help="只核对课程与申请资格")
+    withdrawal = jw.add_parser("withdrawals", help="期中退课页面中的本人课程状态")
+    mode = withdrawal.add_mutually_exclusive_group()
+    mode.add_argument("--verify", metavar="新课程序号", help="同时核对该课是否列于同学期的个人课表")
+    mode.add_argument("--apply", metavar="新课程序号", help="在校方页面本人办理期中退课，随后核对记录和课表")
+    withdrawal.add_argument("--term", help="办理时指定教务页面的完整学期名")
+    withdrawal.add_argument("--preview", action="store_true")
+    jw.add_parser("courses").add_argument("--term", help="完整学期名，可用 calendar terms 查询")
+    for name in ("exams", "grades", "credits"):
+        jw.add_parser(name)
+    media = commands.add_parser("media", help="智慧教学媒体资源管理平台").add_subparsers(dest="operation", required=True)
+    media.add_parser("courses", help="列出本人在媒体平台的全部课程").add_argument("--search", default="", help="课程名或教师名")
+    sessions = media.add_parser("sessions", help="读取课程目录列出的各节课、校方状态及回放入口")
+    sessions.add_argument("--course", required=True, help="media courses 列出的课程 ID 或完整课程名")
+    sessions.add_argument("--status", help="只列指定的校方状态，例如回放或未开始")
+    export = media.add_parser("export", help="导出指定智播回放的课件或语音识别文档")
+    export.add_argument("id", type=int, help="media sessions 返回的课次 ID")
+    export.add_argument("--course", required=True, help="媒体课程 ID 或完整课程名")
+    export.add_argument("--include", choices=["slides", "transcript", "translation"], action="append",
+                        help="可重复选择课件、语音原文、译文。默认仅课件")
+    export.add_argument("--output", required=True, help="保存到新文件")
+    media.add_parser("terms", help="列出媒体平台任务页可选的学期")
+    media_tasks = media.add_parser("tasks", help="查本人必做或选做任务，自动读取全部结果页")
+    media_tasks.add_argument("--term", default="全部", help="media terms 返回的学期，默认查全部")
+    media_tasks.add_argument("--kind", choices=["required", "optional"], default="required")
+    media_tasks.add_argument("--status", choices=["已完成", "未完成"], help="筛选必做任务")
+    media_tasks.add_argument("--type", dest="task_type", help="校方任务类型名称，例如智播或教学视频")
+    media_tasks.add_argument("--search", help="按课程名或任务名搜索")
+    canvas = commands.add_parser("canvas").add_subparsers(dest="operation", required=True)
+    course_list = canvas.add_parser("courses", help="查询本人的 Canvas 课程")
+    groups = canvas.add_parser("groups", help="查看本人当前或往期小组、课程、学期及可进入的链接")
+    navigation = canvas.add_parser("navigation", help="查看本人在该课程或小组页面能使用的导航入口")
+    totals = canvas.add_parser("grades", help="查询本人课程的 Canvas 总评")
+    totals.add_argument("--course")
+    grading = canvas.add_parser("grading", help="查看教师设置的作业分组、权重和舍分规则")
+    grading.add_argument("--course", required=True)
+    syllabus = canvas.add_parser("syllabus", help="查看课程大纲正文、链接和图片地址")
+    syllabus.add_argument("--course", required=True)
+    inbox = canvas.add_parser("inbox", help="读取本人 Canvas 收件箱，可按文件夹或课程筛选")
+    inbox.add_argument("--scope", choices=["inbox", "unread", "starred", "sent", "archived"], default="inbox")
+    inbox.add_argument("--course", help="课程名称、代码或 ID")
+    recipients = canvas.add_parser("recipients", help="按姓名搜索本人可以发消息的用户")
+    recipients.add_argument("keyword", help="姓名或部分姓名")
+    recipients.add_argument("--course", help="限指定在读课程")
+    conversation = canvas.add_parser("conversation", help="查看本人会话或发消息").add_subparsers(dest="action", required=True)
+    thread = conversation.add_parser("show", help="读取会话及消息，保留未读状态")
+    thread.add_argument("id", type=int, help="canvas inbox 返回的会话 ID")
+    compose = conversation.add_parser("send", help="给指定课程中的一位收件人发消息")
+    compose.add_argument("--course", required=True)
+    compose.add_argument("--to", required=True, type=int, help="canvas recipients 返回的用户 ID")
+    compose.add_argument("--subject", required=True)
+    compose.add_argument("--message", required=True)
+    compose.add_argument("--preview", action="store_true", help="只填写编辑框并核对收件人")
+    reply = conversation.add_parser("reply", help="回复会话的全部直接收件人")
+    reply.add_argument("id", type=int)
+    reply.add_argument("--message", required=True)
+    reply.add_argument("--preview", action="store_true", help="只读核对原会话及收件人")
+    update = conversation.add_parser("set", help="修改会话的已读、归档或星标状态")
+    update.add_argument("id", type=int)
+    field = update.add_mutually_exclusive_group(required=True)
+    field.add_argument("--state", choices=["read", "unread", "archived"])
+    field.add_argument("--star", choices=["on", "off"])
+    update.add_argument("--preview", action="store_true", help="只读比较当前和目标状态")
+    quiz = canvas.add_parser("quiz", help="查询课程测验及本人的作答记录").add_subparsers(dest="action", required=True)
+    quiz_commands = []
+    for name in ("list", "show", "submission"):
+        command = quiz.add_parser(name)
+        quiz_commands.append(command)
+        command.add_argument("--course", required=True)
+        if name != "list":
+            command.add_argument("id", type=int, help="quiz list 返回的 ID")
+            command.add_argument("--engine", choices=["classic", "new"], default="classic", help="quiz list 返回的测验类型")
+    preferences = canvas.add_parser("notifications", help="本人 Canvas 账户各渠道的通知频率")
+    preferences.add_argument("--channel", type=int, help="只看指定渠道 ID")
+    preferences.add_argument("--category", help="只看指定类别，例如 announcement")
+    setting = canvas.add_parser("notification").add_subparsers(dest="action", required=True).add_parser("set")
+    setting.add_argument("--channel", type=int, required=True, help="canvas notifications 输出的渠道 ID")
+    setting.add_argument("--category", required=True, help="要调整的通知类别")
+    setting.add_argument("--frequency", choices=["immediately", "daily", "weekly", "never"], required=True)
+    setting.add_argument("--preview", action="store_true", help="在账户通知设置中核对目标菜单，不保存")
+    files = canvas.add_parser("files", help="列出课程或小组文件及下载所需 ID")
+    download = canvas.add_parser("file").add_subparsers(dest="action", required=True).add_parser("download")
+    download.add_argument("id", type=int)
+    download.add_argument("--output", required=True, help="新建的本地文件路径")
+    topics = canvas.add_parser("discussions", help="课程或小组的讨论主题")
+    discussion = canvas.add_parser("discussion").add_subparsers(dest="action", required=True)
+    create_topic = discussion.add_parser("create", help="在课程或小组中保存新的普通讨论主题")
+    create_topic.add_argument("--title", required=True)
+    create_topic.add_argument("--message", required=True, help="纯文本正文")
+    create_topic.add_argument("--preview", action="store_true", help="核对新讨论表单和保存按钮")
+    reply = discussion.add_parser("reply", help="回复讨论主题或指定发言")
+    reply.add_argument("id", type=int)
+    reply.add_argument("--parent", type=int, help="所回复发言的 ID")
+    reply.add_argument("--message", required=True, help="纯文本正文")
+    reply.add_argument("--preview", action="store_true", help="核对回复目标及编辑框")
+    topic = discussion.add_parser("show")
+    topic.add_argument("id", type=int)
+    topic.add_argument("--replies", action="store_true", help="同时读取对本人可见的讨论回复")
+    events = canvas.add_parser("calendar", help="查询个人日历，可指定课程日历")
+    events.add_argument("--course")
+    events.add_argument("--from", dest="start_day", type=date.fromisoformat, metavar="YYYY-MM-DD")
+    events.add_argument("--next", type=duration, default=7, metavar="7d")
+    plan = canvas.add_parser("planner", help="按日期查询 Canvas 学习计划，含测验、讨论等事项")
+    plan.add_argument("--from", dest="start_day", type=date.fromisoformat, metavar="YYYY-MM-DD")
+    plan.add_argument("--next", type=duration, default=7, metavar="7d")
+    pages = canvas.add_parser("pages", help="列出课程或小组 Wiki 页面及其 slug")
+    detail = canvas.add_parser("page").add_subparsers(dest="action", required=True).add_parser("show")
+    detail.add_argument("slug")
+    for command in (navigation, files, download, topics, topic, reply, create_topic, pages, detail):
+        target = command.add_mutually_exclusive_group(required=True)
+        target.add_argument("--course", help="课程名称、代码或 ID")
+        target.add_argument("--group", type=int, help="canvas groups 列出的可进入小组 ID")
+    receipt = canvas.add_parser("submission", help="本人作业提交回执与反馈")
+    receipt.add_argument("id", type=int)
+    receipt.add_argument("--course", required=True)
+    receipt.add_argument("--history", action="store_true", help="按尝试次数列出本人各次交件的时间、内容与附件编号")
+    tasks = canvas.add_parser("assignments")
+    tasks.add_argument("--course")
+    window = tasks.add_mutually_exclusive_group()
+    window.add_argument("--due", choices=["today"])
+    window.add_argument("--next", type=duration, metavar="7d")
+    window.add_argument("--overdue", action="store_true")
+    actions = canvas.add_parser("assignment").add_subparsers(dest="action", required=True)
+    send = actions.add_parser("submit", help="按作业允许的方式提交并核对本人回执")
+    send.add_argument("id", type=int)
+    send.add_argument("--course", required=True)
+    payload = send.add_mutually_exclusive_group(required=True)
+    payload.add_argument("--file", action="append", help="本地文件，可重复指定")
+    payload.add_argument("--text", help="要提交的纯文本，可含换行")
+    payload.add_argument("--url", help="要提交的网页完整地址")
+    send.add_argument("--preview", action="store_true", help="按该作业允许的类型核对交件内容")
+    show = actions.add_parser("show")
+    show.add_argument("id", type=int)
+    show.add_argument("--course", required=True)
+    attachment = actions.add_parser("download", help="下载本人这份作业的提交或反馈附件")
+    attachment.add_argument("id", type=int, help="作业 ID")
+    attachment.add_argument("--course", required=True)
+    attachment.add_argument("--attachment", required=True, type=int, help="canvas submission 列出的附件 ID")
+    attachment.add_argument("--attempt", type=int, help="下载指定尝试的本人提交附件")
+    attachment.add_argument("--output", required=True, help="保存到新文件")
+    rubric = actions.add_parser("rubric", help="查看作业评分量规的标准、等级和分值")
+    rubric.add_argument("id", type=int)
+    rubric.add_argument("--course", required=True)
+    materials = canvas.add_parser("materials", help="查课程模块和讲义目录")
+    materials.add_argument("--course", required=True)
+    canvas_notices = canvas.add_parser("announcements", help="最近的课程公告，或指定小组的公告")
+    canvas_notices.add_argument("--since", type=duration, default=7, metavar="7d")
+    audience = canvas_notices.add_mutually_exclusive_group()
+    audience.add_argument("--course", help="课程名称、代码或 ID")
+    audience.add_argument("--group", type=int, help="canvas groups 返回的小组 ID")
+    for course_query in (course_list, groups, navigation, totals, grading, syllabus, rubric, materials, files, download, pages, detail, tasks, show, receipt, attachment, topics, topic, canvas_notices, *quiz_commands):
+        course_query.add_argument("--state", choices=["active", "completed"], default="active",
+                                  help="active 查在读，completed 查已结课")
+    calendar = commands.add_parser("calendar").add_subparsers(dest="operation", required=True)
+    terms = calendar.add_parser("terms", help="公开学期目录、起止日期及教学周与考试周范围")
+    terms.add_argument("--year", type=int, help="学年的起始年份，如 2026")
+    span = calendar.add_parser("range", help="逐日查看一段日期内学校公布的校历标记")
+    span.add_argument("start", type=date.fromisoformat, metavar="开始日期")
+    span.add_argument("end", type=date.fromisoformat, metavar="结束日期")
+    calendar.add_parser("week").add_argument("date", type=date.fromisoformat, nargs="?")
+    calendar.add_parser("day").add_argument("date", type=date.fromisoformat)
+    rooms = commands.add_parser("rooms").add_subparsers(dest="operation", required=True)
+    rooms.add_parser("search", help="在公开教室信息系统按名称查找教室").add_argument("keyword", metavar="关键词")
+    rooms.add_parser("status", help="按完整教室名读取公开状态").add_argument("name", metavar="完整教室名")
+    buildings = rooms.add_parser("buildings", help="查教学楼名称和教务编号")
+    buildings.add_argument("--campus", choices=list(school_calendar.CAMPUSES))
+    directory = rooms.add_parser("list", help="查询教学楼内的教室及课表查询 ID")
+    directory.add_argument("--building", required=True, help="rooms buildings 给出的教学楼编号")
+    schedule = rooms.add_parser("schedule")
+    schedule.add_argument("--room", required=True, help="教室编号")
+    schedule.add_argument("--term", help="校方学期编号，默认当前学期")
+    campus_guides.configure(commands)
+    import dorm_energy
+    dorm_energy.configure(commands)
+    notices.configure(commands)
+    bus.configure(commands)
+    library_services.configure(commands)
+    args = parser.parse_args(argv)
+    if args.command == "jw" and args.operation == "withdrawals":
+        if args.apply and not args.term:
+            parser.error("withdrawals --apply 需要指定 --term")
+        if (args.term or args.preview) and not args.apply:
+            parser.error("withdrawals 的 --term 与 --preview 需要搭配 --apply")
+    args.json = options.json
+    return args
+
+
+def public_query(args, day):
+    if args.command == "dorm":
+        from dorm_energy import energy
+        return energy(args, day)
+    if args.command in {"sports", "clinic", "card"}:
+        import campus_guides
+        return campus_guides.read(args)
+    if args.command == "calendar":
+        if args.operation == "terms":
+            return school_calendar.calendar_terms(args.year)
+        return school_calendar.calendar_info(args.date or day, args.operation == "day")
+    if args.command == "rooms":
+        if args.operation == "search":
+            from rooms_public import search_rooms
+            return [search_rooms(args.keyword)]
+        if args.operation == "status":
+            from rooms_public import room_status
+            return [room_status(args.name)]
+        if args.operation == "schedule":
+            return school_calendar.room_schedule(args.room, args.term)
+        return school_calendar.room_directory(getattr(args, "building", None), getattr(args, "campus", None))
+    if args.command == "bus":
+        import bus
+        return bus.run(args)
+    import library_services
+    return library_services.run(args)
+
+
+def site_items(args, site, context, page, now):
+    day = now.date()
+    if site == "stadium":
+        if args.operation == "orders":
+            from stadium_orders import orders
+            return orders(page)
+        if args.operation == "reserve":
+            from stadium_orders import reserve
+            return reserve(page, args, confirm_sports_checkout)
+        from stadium import slots
+        return slots(page, args.venue, args.date, args.sport)
+    if site == "card":
+        if args.operation == "transactions":
+            from card_transactions import transactions
+            end = args.end_date or day
+            return transactions(page, args.start_date or (end - timedelta(days=6)), end)
+        from campus_guides import card_balance
+        return card_balance(page)
+    if site == "space":
+        from library_space import availability, reservation_history, reserve_seat
+        if args.operation == "rooms":
+            if args.action == "receipts":
+                from library_room_booking import lookup_room_receipts
+                return lookup_room_receipts(page, args)
+            if args.action in {"slots", "reserve"}:
+                from library_room_booking import room_booking
+                return room_booking(page, args)
+            from library_rooms import room_directory
+            return room_directory(page, args)
+        if args.operation == "study":
+            if args.action == "reserve":
+                from library_study import reserve_study
+                return reserve_study(page, args)
+            return availability(page, branch=args.branch, floor=args.floor, area=getattr(args, "area", None),
+                                study_type=args.study_type, period=getattr(args, "period", "current"))
+        if args.operation == "seats":
+            if args.action == "reserve":
+                return reserve_seat(page, args)
+            return availability(page, args.date, args.branch, args.floor, getattr(args, "area", None),
+                                getattr(args, "time_slot", None))
+        return reservation_history(page, args.kind, args.limit)
+    if args.command == "today":
+        return assignments(context, day) if site == "canvas" else timetable(page, day)
+    if args.command == "week":
+        if site == "canvas":
+            return canvas_api.tasks(context, day, 7)
+        return timetable_range(page, [day + timedelta(days=i) for i in range(7)])
+    if site == "jw":
+        if args.operation == "mentors":
+            from jw_mentors import mentor_meetings, mentor_profile
+            return mentor_meetings(page) if args.action == "meetings" else mentor_profile(page, args.kind)
+        if args.operation == "help-center":
+            from jw_help import help_center
+            return help_center(page, args)
+        if args.operation == "graduation":
+            from jw_graduation import defenses, task_books
+            return defenses(page) if args.action == "defenses" else task_books(page, args)
+        if args.operation == "major-timetable":
+            from jw_major_timetable import major_timetable
+            return major_timetable(page, args.term, args.search)
+        if args.operation == "forms":
+            from jw_forms import forms
+            return forms(page, args)
+        if args.operation == "schemes":
+            from jw_schemes import schemes
+            return schemes(page, args)
+        if args.operation == "progress":
+            from jw_progress import progress
+            return progress(page, args)
+        if args.operation == "competitions":
+            from jw_competitions import competitions
+            return competitions(page, args)
+        if args.operation == "applications":
+            from jw_applications import applications
+            return applications(page, args)
+        if args.operation == "notices":
+            from jw_announcements import announcements
+            return announcements(page, args)
+        if args.operation == "syllabus":
+            from jw_syllabus import syllabus
+            return syllabus(page, args)
+        if args.operation == "menu":
+            from jw_menu import student_menu
+            return student_menu(page, args.section, args.search)
+        if personal_change_command(args):
+            from jw_personal_changes import personal_change
+            enrolling = args.operation == "enrollment"
+            return personal_change(page, "enroll" if enrolling else "withdraw", args.term,
+                                   args.code if enrolling else args.apply, preview=args.preview)
+        if args.operation == "retakes":
+            from jw_retake import retakes
+            return retakes(page, getattr(args, "code", None), getattr(args, "preview", False))
+        if args.operation == "withdrawals" and args.verify:
+            from jw_records import check_withdrawal
+            return check_withdrawal(page, args.verify)
+        if args.operation == "plan":
+            from jw_records import personal_plan
+            return personal_plan(page, getattr(args, "output", None))
+        if args.operation != "timetable":
+            from jw_records import enrollment_status, records
+            if args.operation == "enrollment" and args.action == "status":
+                return enrollment_status(page)
+            return records(page, args.action if args.operation == "enrollment" else args.operation,
+                           requested_term=getattr(args, "term", None))
+        if not args.week:
+            return timetable(page, day)
+        monday = day - timedelta(days=day.weekday()) + timedelta(weeks=int(args.week == "next"))
+        return timetable_range(page, [monday + timedelta(days=i) for i in range(7)])
+    if site == "media":
+        if args.operation == "courses":
+            return media_courses.courses(page, args.search)
+        if args.operation == "sessions":
+            from media_sessions import sessions
+            return sessions(page, args.course, args.status)
+        if args.operation == "export":
+            from media_export import export_courseware
+            return export_courseware(page, args)
+        from media_tasks import tasks
+        return tasks(page, args)
+    if args.operation in {"grades", "grading"}:
+        from canvas_grades import grades, grading
+        return (grades if args.operation == "grades" else grading)(context, args.course, args.state)
+    if args.operation == "quiz":
+        from canvas_quizzes import quizzes, quiz_detail, quiz_submission
+        if args.action == "list":
+            return quizzes(context, args.course, args.state)
+        read = quiz_detail if args.action == "show" else quiz_submission
+        return read(context, args.course, args.id, args.engine, args.state)
+    if args.operation == "inbox":
+        from canvas_inbox import inbox
+        return inbox(context, args.scope, args.course)
+    if args.operation == "recipients":
+        from canvas_inbox import recipients
+        return recipients(context, args.keyword, args.course)
+    if args.operation == "conversation":
+        if args.action == "send":
+            from canvas_compose import send_message
+            return send_message(context, page, args.course, args.to, args.subject, args.message, args.preview)
+        if args.action == "reply":
+            from canvas_thread_actions import reply
+            return reply(context, page, args.id, args.message, args.preview)
+        if args.action == "set":
+            from canvas_thread_actions import set_state
+            return set_state(context, page, args.id, args.state, args.star, args.preview)
+        from canvas_inbox import conversation
+        return conversation(context, args.id)
+    if args.operation in {"notification", "notifications"}:
+        from canvas_notifications import notification_settings
+        return notification_settings(context, page, args)
+    if args.operation in {"discussion", "discussions"}:
+        from canvas_navigation import select_group
+        state = getattr(args, "state", "active")
+        group = select_group(page, args.group, state) if args.group is not None else None
+        if getattr(args, "action", None) == "create":
+            from canvas_discussion import create_topic
+            return create_topic(context, page, args.course, args.title, args.message, args.preview, group=group)
+        if getattr(args, "action", None) == "reply":
+            from canvas_discussion import reply
+            return reply(context, page, args.course, args.id, args.parent, args.message, args.preview, group=group)
+        return canvas_api.discussions(context, args.course, getattr(args, "id", None),
+                                      getattr(args, "replies", False), state, group=group)
+    if args.operation in {"files", "file", "pages", "page"} and args.group is not None:
+        from canvas_navigation import select_group
+        group = select_group(page, args.group, args.state)
+        if args.operation in {"pages", "page"}:
+            return canvas_api.scoped_pages(context, "groups", group, getattr(args, "slug", None))
+        if args.operation == "files":
+            return canvas_api.scoped_files(context, "groups", group["id"])
+        return canvas_api.download_scoped_file(context, "groups", group["id"], args.id, args.output)
+    if args.operation == "files":
+        return canvas_api.course_files(context, args.course, args.state)
+    if args.operation == "syllabus":
+        return canvas_api.syllabus(context, args.course, args.state)
+    if args.operation == "file":
+        return canvas_api.download_file(context, args.course, args.id, args.output, args.state)
+    if args.operation == "calendar":
+        return canvas_api.calendar_events(context, args.start_day or day, args.next, args.course)
+    if args.operation == "planner":
+        return canvas_api.planner(context, args.start_day or day, args.next)
+    if args.operation in {"page", "pages"}:
+        return canvas_api.course_pages(context, args.course, getattr(args, "slug", None), args.state)
+    if args.operation == "submission":
+        return canvas_api.own_submission(context, args.course, args.id, args.state, history=args.history)
+    if args.operation == "groups":
+        from canvas_navigation import groups
+        return groups(page, args.state)
+    if args.operation == "navigation":
+        from canvas_navigation import navigation
+        return navigation(context, page, args)
+    if args.operation == "courses":
+        return canvas_api.courses(context, args.state)
+    if args.operation == "assignment":
+        if args.action == "download":
+            return canvas_api.download_submission_attachment(context, args.course, args.id, args.attachment,
+                                                            args.output, args.state, attempt=args.attempt)
+        if args.action == "rubric":
+            from canvas_grades import rubric
+            return rubric(context, args.course, args.id, args.state)
+        if args.action == "submit":
+            from canvas_submit import submit
+            return submit(context, page, args.course, args.id, args.file, args.preview,
+                          text=args.text, url=args.url)
+        return canvas_api.show_assignment(context, args.course, args.id, args.state)
+    if args.operation == "materials":
+        return canvas_api.materials(context, args.course, args.state)
+    if args.operation == "announcements":
+        from canvas_navigation import select_group
+        group = select_group(page, args.group, args.state) if args.group is not None else None
+        return canvas_api.announcements(context, args.since, now, args.course, args.state, group=group)
+    if args.state == "active" and not (args.course or args.next or args.overdue):
+        return assignments(context, day)
+    return canvas_api.tasks(context, day, 1 if args.due else args.next, args.course, args.overdue, args.state)
+
+
+def personal_change_command(args):
+    return args.command == "jw" and ((args.operation == "enrollment" and args.action == "apply")
+                                     or (args.operation == "withdrawals" and args.apply))
+
+
+def confirm_sports_checkout(row, price):
+    print(f"{row['date']} {row['venue']} {row['field']} {row['time_slot']}，合计 {price}。"
+          "请在体育平台完成本次下单，再回到终端按回车核对个人订单。", file=sys.stderr, flush=True)
+    try:
+        input()
+    except EOFError:
+        raise QueryUnavailable("核对订单需要交互终端，请查询 sports orders") from None
+
+
+def main():
+    args = arguments()
+    now = datetime.now(SHANGHAI)
+    if (args.command == "library" and args.operation in {"study", "rooms"} and args.action == "reserve"
+            and not args.preview and not sys.stdin.isatty()):
+        return display({"library": {"status": "unverified", "detail": "请在交互终端运行，或加 --preview 核对所选预约"}}, args.json)
+    if args.command == "sports" and args.operation == "reserve" and not args.preview and not sys.stdin.isatty():
+        return display({"sports": {"status": "unverified", "detail": "请在交互终端运行以完成场馆下单，或加 --preview 查看金额"}}, args.json)
+    if args.command == "sports" and args.operation in {"slots", "orders", "reserve"}:
+        args.site = "stadium"
+        return display({"sports": signed_in_queries(args, now)["stadium"]}, args.json)
+    if args.command == "card" and args.operation in {"balance", "transactions"}:
+        return display(signed_in_queries(args, now), args.json)
+    if args.command == "library" and (args.operation in {"reservations", "study", "rooms"} or
+                                      (args.operation == "seats" and args.action in {"availability", "list", "reserve"})):
+        args.site = "space"
+        return display({"library": signed_in_queries(args, now)["space"]}, args.json)
+    if args.command in {"calendar", "rooms", "bus", "library", "service", "notices", "sports", "clinic", "card", "dorm"}:
+        try:
+            if args.command == "library" and args.operation in {"loans", "renew"}:
+                from library_loans import loans
+                entry = loans(PROFILE, history=getattr(args, "history", False),
+                              renewal=args if args.operation == "renew" else None)
+            elif args.command == "calendar" and args.operation == "range":
+                entry = school_calendar.calendar_range(args.start, args.end)
+            elif args.command == "notices":
+                import notices
+                entry = notices.result(args)
+            elif args.command == "service" and args.operation in {"forms", "form"}:
+                from notices import graduate_forms
+                entry = graduate_forms(args)
+            elif args.command == "service" and args.operation == "certificates":
+                from portal_legacy import certificates
+                entry = certificates(PROFILE, args.template)
+            elif args.command == "service" and args.operation == "certificate":
+                from portal_certificate_download import download
+                if not args.preview and not args.output:
+                    raise QueryUnavailable("下载电子证明需要 --output 指定新文件路径")
+                entry = download(PROFILE, args.receipt, args.output, args.preview)
+            elif args.command == "service" and args.operation == "apply":
+                if args.source == "portal":
+                    from portal_legacy import apply
+                    entry = apply(PROFILE, args.title, args.preview, template=args.template)
+                else:
+                    from portal_apply import apply
+                    if args.template is not None:
+                        raise QueryUnavailable("--template 适用于 --source portal 的学生电子证明文件")
+                    entry = apply(PROFILE, args.title, args.preview)
+            elif args.command == "service" and args.operation != "find":
+                from portal_records import records
+                entry = records(PROFILE, args.operation, getattr(args, "state", None), getattr(args, "with_flow", False))
+            elif args.command == "service":
+                import library_services
+                entry = library_services.service_results(args, PROFILE)
+            else:
+                entry = {"status": "ok", "items": public_query(args, now.date())}
+        except (QueryUnavailable, OSError, Error, ValueError, KeyError, TypeError) as error:
+            entry = failure(error)
+        return display({args.command: entry}, args.json)
+    results = signed_in_queries(args, now)
+    if args.command == "week":
+        results = week_view(results, now.date())
+    return display(results, args.json)
+
+
+def week_view(results, start):
+    by_day = {(start + timedelta(days=i)).isoformat(): {} for i in range(7)}
+    for row in results["jw"].get("items", []):
+        by_day[row["date"]].update(classes=row["items"], timetable_source=row["source"])
+    if "items" in results["canvas"]:
+        for row in by_day.values():
+            row["assignments"] = []
+        for row in results["canvas"]["items"]:
+            by_day[row["due"][:10]]["assignments"].append(row)
+    status = "ok" if all("items" in entry for entry in results.values()) else "partial"
+    summary = {site: {k: v for k, v in entry.items() if k != "items"} for site, entry in results.items()}
+    summary["week"] = {"status": status, "items": [{"date": day, **row} for day, row in by_day.items()]}
+    return summary
+
+
+def failure(error):
+    message = str(error) if isinstance(error, QueryUnavailable) else "页面或数据格式未能核实"
+    return {"status": "unverified", "detail": message}
+
+
+def signed_in_queries(args, now):
+    interactive = args.command == "login"
+    site_filter = getattr(args, "site", args.command)
+    if args.command in {"login", "status"} and site_filter == "all":
+        sites = list(SITES)
+    elif site_filter in SITES:
+        sites = [site_filter]
+    else:
+        sites = ["canvas", "jw"]
+    os.umask(0o077)
+    PROFILE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    results = {}
+    with sync_playwright() as engine:
+        checkout_window = args.command == "sports" and args.operation == "reserve" and not args.preview
+        library_window = args.command == "library" and args.operation in {"study", "rooms"} and args.action == "reserve" and not args.preview
+        handoff = checkout_window or library_window or (personal_change_command(args) and not args.preview)
+        context = open_session(engine, PROFILE, interactive=interactive or bool(handoff), no_viewport=True)
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            if interactive:
+                page.bring_to_front()
+            for site in sites:
+                if interactive:
+                    print(f"正在打开 {site} 的学校页面，请在浏览器内完成认证。", file=sys.stderr, flush=True)
+                try:
+                    state = visit(page, site, interactive)
+                    entry = {"status": state}
+                    if state == "authenticated" and args.command not in {"login", "status"}:
+                        output = site_items(args, site, context, page, now)
+                        if isinstance(output, dict):
+                            entry.update(output)
+                        else:
+                            entry["items"] = output
+                    results[site] = entry
+                except (Error, AssertionError, QueryUnavailable, OSError, ValueError, KeyError, TypeError) as error:
+                    if page.is_closed():
+                        raise
+                    results[site] = failure(error)
+        finally:
+            context.close()
+    if interactive and any(entry["status"] == "authenticated" for entry in results.values()):
+        check = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "status", *(["--site", site_filter] if site_filter else []), "--json"],
+            capture_output=True, text=True,
+        )
+        if check.stdout.strip():
+            restarted = json.loads(check.stdout)
+        else:
+            restarted = {}
+        for site, entry in results.items():
+            entry["after_restart"] = restarted.get(site, {}).get("status", "unverified")
+    return results
+
+
+def display(results, as_json):
+    if as_json:
+        print(json.dumps(results, ensure_ascii=False))
+    else:
+        for site, entry in results.items():
+            print(f"{site}: {entry['status']}")
+            if "after_restart" in entry:
+                print(f"重开专用浏览器后: {entry['after_restart']}")
+            if "detail" in entry:
+                print(entry["detail"])
+            if "items" in entry:
+                print(f"共 {len(entry['items'])} 项")
+                for item in entry["items"]:
+                    print_record(item)
+    ok = all(entry["status"] in {"authenticated", "ok"} and
+             entry.get("after_restart", "authenticated") == "authenticated" for entry in results.values())
+    return 0 if ok else 1
+
+
+FIELD_LABELS = {
+    "assignment_receipt": "本人作业回执", "menu_path": "菜单路径", "syllabus_id": "大纲编号",
+    "candidate_windows": "达到最短预约时长的空档", "receipt_id": "回执编号",
+    "topic_options": "可选申请主题", "topic": "申请主题", "purpose_filled": "已填写申请内容",
+    "occupied": "已占时段", "unoccupied": "未被占用的时段", "open_hours": "开放时段",
+    "min_minutes": "最短时长（分钟）", "max_minutes": "最长时长（分钟）",
+    "min_people": "最少人数", "max_people": "最多人数", "form_fields": "申请表项目",
+    "room_id": "空间编号", "room_name": "空间名称", "room_type": "空间类型", "selected": "当前选中",
+    "seat_type": "座位类型", "periods": "馆方开放查询的预约周期", "start_date": "起始日期", "end_date": "截止日期",
+    "permission": "本账号该期预约权限", "seat_numbers": "空闲座位号",
+    "included": "导出内容", "filename": "文件名",
+    "completion_status": "是否完成", "start_time": "开始时间", "end_time": "结束时间",
+    "group_id": "小组 ID", "group_name": "小组名称", "published": "已发布",
+    "teacher": "主讲教师", "last_studied": "上次学习", "task_count": "任务数",
+    "electricity_unit": "电量单位", "unit_price_yuan_per_kwh": "单价（元/度）",
+    "water_unit": "水量单位", "remaining_water": "房间剩余水量", "used_water": "用水量", "unit_price_yuan_per_tonne": "单价（元/吨）",
+    "remaining_electricity": "房间剩余电量", "purchased_electricity": "房间累计购电量", "used_electricity": "用电量",
+    "campus_query": "校内水电查询入口", "images": "配图", "index": "序号", "links": "链接", "readings": "逐日用量记录",
+    "recorded_at": "校方记录时间", "startDate": "起始日期", "endDate": "截止日期",
+    "totals_hidden": "课程隐藏总评", "marks": "本人选课成绩", "current_score": "当前得分（%）",
+    "current_grade": "当前等级", "final_score": "计入未评分作业后的得分（%）", "final_grade": "计入未评分作业后的等级",
+    "weighted": "按组加权", "groups": "作业分组", "weight_percent": "分组权重（%）",
+    "drop_lowest": "舍去最低项数", "drop_highest": "舍去最高项数", "never_drop": "不参与本组舍分的作业 ID",
+    "points_possible": "满分", "omit_from_final_grade": "从总评排除",
+    "rubric": "评分量规", "criteria": "评分标准", "ratings": "等级", "points": "分值", "used_for_grading": "用于评分",
+    "description": "说明", "long_description": "详细说明", "criterion_use_range": "按区间评分",
+    "ignore_for_scoring": "从评分排除", "free_form_comments": "自由评语", "has_content": "提供了大纲内容",
+    "recipient_id": "收件人 ID", "recipient_ids": "收件人 ID", "message_id": "消息 ID",
+    "editor_checked": "已核对编辑框", "attribute": "设置项", "previous": "变更前的值", "target": "目标值",
+    "last_message": "最近消息", "updated_at": "更新时间", "starred": "星标", "context": "所属课程或小组",
+    "message_count": "消息数", "messages": "消息", "participants": "参与者", "author": "发送人", "author_id": "发送人 ID",
+    "attachment_details": "附件详情", "attachment_id": "附件 ID", "attempt": "提交次数",
+    "forwarded": "转发的消息", "attachments": "附件", "media_comment": "媒体留言", "state": "状态",
+    "id": "ID", "title": "名称", "course": "课程", "instructions": "作业要求", "date": "日期",
+    "period": "节次", "campus": "校区", "detail": "内容", "locations_as_listed": "课表地点",
+    "submitted": "已提交", "due": "截止", "url": "链接", "source": "来源", "code": "编号",
+    "course_id": "课程 ID", "submission_state": "提交状态", "submission_types": "提交方式",
+    "channel_id": "渠道 ID", "channel_type": "渠道类型", "channel_state": "渠道状态",
+    "notification": "通知项", "frequency": "通知频率", "body": "正文", "posted": "发布时间", "module": "模块", "type": "类型", "source_url": "来源",
+    "semester_id": "校历学期编号", "year": "学年起始年份",
+    "teaching_week_start": "教学开始周", "teaching_week_end": "教学结束周",
+    "exam_week_start": "考试开始周", "exam_week_end": "考试结束周",
+    "semester": "学期", "week": "周次", "day_type": "校历标记", "classes": "课表",
+    "assignments": "作业", "items": "条目", "week_start": "周一", "week_end": "周日",
+    "floor": "楼层", "area": "区域", "seat": "座位号", "available": "空余", "total": "总数",
+    "booking_available": "当前可提交", "booking_button": "馆方按钮", "receipt": "回执",
+    "term": "学期", "dorm_building": "宿舍楼", "dorm_room": "宿舍号",
+    "venue": "场馆", "sport": "项目", "field": "场地", "facility": "医疗机构", "building": "教学楼", "parent_id": "父回复 ID",
+    "copies": "逐册馆藏", "locations": "各馆藏地",
+    "previous_due_date": "原应还日期", "barcode": "条码号", "returned_date": "实还日期", "due_date": "应还日期", "borrowed_date": "借阅日期",
+    "observed_at": "查询时间", "time_slot": "时段", "branch": "馆区", "hours": "开放时间", "areas": "分区", "bibliography": "书目信息", "search_url": "检索页",
+    "audience": "适用人群", "steps": "办理步骤", "notes": "说明", "materials": "所需材料", "guide": "指南",
+    "keyword": "关键词", "rooms": "教室列表", "status": "状态", "usage": "教室情况", "study_time": "自习可用时长",
+    "booking": "场次", "amount": "金额",
+    "department": "部门", "category": "分类", "line": "线路", "regular_source": "常规时刻表",
+    "calendar_source": "校历来源", "room": "教室", "schedule": "安排", "action": "操作",
+    "departures": "发车时刻", "stop_source": "候车点调整公告",
+    "timetable_source": "教务原课表", "teaching_week": "教学周", "departure": "计划发车", "stop": "上车点", "from": "从", "to": "到",
+}
+
+
+def print_record(row, indent="  "):
+    if not isinstance(row, dict):
+        print(indent + str(row))
+        return
+    for key, value in row.items():
+        label = FIELD_LABELS.get(key, key)
+        if isinstance(value, dict):
+            print(f"{indent}{label}")
+            print_record(value, indent + "  ")
+        elif isinstance(value, list) and value and isinstance(value[0], dict):
+            print(f"{indent}{label}（{len(value)}）")
+            for item in value:
+                print_record(item, indent + "  ")
+        else:
+            if isinstance(value, list):
+                value = "、".join(map(str, value)) or "无"
+            elif value is None:
+                value = "未提供"
+            elif isinstance(value, bool):
+                value = "是" if value else "否"
+            print(f"{indent}{label}  {value}")
+    if indent == "  ":
+        print()
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Error as error:
+        if "SingletonLock" in str(error) or "ProcessSingleton" in str(error):
+            sys.exit("专用 Chrome 正被另一条 tongji 命令使用，请在它结束后重试。")
+        sys.exit("Chrome 未完成操作。请确认已安装 Chrome，并保持专用窗口打开。")
