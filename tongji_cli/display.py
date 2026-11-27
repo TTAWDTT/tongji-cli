@@ -22,7 +22,11 @@ def display(results, as_json):
                 for item in entry["undated_assignments"]:
                     print_record(item)
             if "items" in entry:
-                print(f"共 {len(entry['items'])} 项")
+                if site == "chaoxing" and entry["status"] == "partial":
+                    count = len(entry["items"])
+                    print(f"已核实 {count} 项" if count else "暂未取得可核实的条目")
+                else:
+                    print(f"共 {len(entry['items'])} 项")
                 for item in entry["items"]:
                     print_record(item)
     ok = all(entry["status"] in {"authenticated", "ok"} and

@@ -32,8 +32,11 @@ def observe(page, site):
     if site == "chaoxing":
         if host and host.endswith(".chaoxing.com") and host.startswith("passport"):
             return "login_required"
-        if host == "i.chaoxing.com" and page.get_by_text("课程", exact=True).first.is_visible():
-            return "authenticated"
+        if host == "i.chaoxing.com":
+            if page.locator('input[type=password]:visible').count():
+                return "login_required"
+            if page.get_by_text("课程", exact=True).filter(visible=True).count():
+                return "authenticated"
         return "unverified"
     if host == "iam.tongji.edu.cn":
         return "login_required"

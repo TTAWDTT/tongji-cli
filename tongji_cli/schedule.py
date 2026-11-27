@@ -26,18 +26,21 @@ def week_view(results, start):
     if "chaoxing" in results:
         cx = results["chaoxing"]
         if "items" in cx:
-            for row in by_day.values():
-                row["chaoxing_assignments"] = []
+            if cx.get("status") in {"authenticated", "ok"}:
+                for row in by_day.values():
+                    row["chaoxing_assignments"] = []
             for item in cx["items"]:
                 due = item.get("due")
                 if not due:
                     undated.append(item)
                 elif due[:10] in by_day:
-                    by_day[due[:10]]["chaoxing_assignments"].append(item)
+                    by_day[due[:10]].setdefault("chaoxing_assignments", []).append(item)
     status = "ok" if all("items" in entry and entry.get("status") in {"ok", "authenticated"} for entry in results.values()) else "partial"
     summary = {site: {k: v for k, v in entry.items() if k != "items"} for site, entry in results.items()}
     summary["week"] = {"status": status, "items": [{"date": day, **row} for day, row in by_day.items()]}
     if "chaoxing" in results and "items" in results["chaoxing"]:
         summary["week"]["undated_assignments"] = undated
         summary["week"]["detail"] = "学习通截止时间缺失或缺少年份的作业单列；未将它们判定为本周或已逾期"
+        if results["chaoxing"].get("status") == "partial":
+            summary["week"]["detail"] += "。学习通读取不完整，各日期只列出已核实的作业"
     return summary

@@ -5,6 +5,7 @@ from datetime import datetime
 from playwright.sync_api import Error
 
 from tongji_cli.auth import SITES, signed_in_queries
+from tongji_cli.browser_session import CHANNEL
 from tongji_cli.campus import commands as campus
 from tongji_cli.canvas import commands as canvas
 from tongji_cli.common import QueryUnavailable, SHANGHAI, failure
@@ -113,6 +114,7 @@ def main():
     try:
         return run(arguments())
     except Error as error:
+        browser = "Chrome" if CHANNEL == "chrome" else "Playwright Chromium"
         if "SingletonLock" in str(error) or "ProcessSingleton" in str(error):
-            sys.exit("专用 Chrome 正被另一条 tongji 命令使用，请在它结束后重试。")
-        sys.exit("Chrome 未完成操作。请确认已安装 Chrome，并保持专用窗口打开。")
+            sys.exit(f"专用 {browser} 正被另一条 tongji 命令使用，请在它结束后重试。")
+        sys.exit(f"{browser} 未完成操作。请确认已安装 {browser}，并保持专用窗口打开。")

@@ -12,7 +12,7 @@ uv tool install tongji-cli
 pipx install tongji-cli
 ```
 
-安装后可以在任意目录运行 `tongji --help` 查看命令。个人查询需要 Google Chrome，在 macOS 上安装 Chrome 后即可登录并查看本周安排。
+安装后可以在任意目录运行 `tongji --help` 查看命令。个人查询默认使用 Google Chrome，也可选择下文的 Playwright Chromium。Windows 安装包包含上海日期计算需要的时区依赖。
 
 ```sh
 tongji login
@@ -41,7 +41,7 @@ curl -fsSL --create-dirs -o "$HOME/.claude/skills/tongji-cli/SKILL.md" https://r
 
 ## 登录与一周安排
 
-`tongji login` 打开专用 Chrome，依次访问同济 Canvas 和教务工作台。请在学校页面完成认证，让命令自行关闭窗口。它会另起进程验证登录是否保留。专用配置位于 `~/.local/share/tongji-cli/chrome`。`tongji status` 默认检查教务与 Canvas。`--site service`、`--site library`、`--site jw`、`--site canvas`、`--site space`、`--site card`、`--site stadium` 和 `--site media` 可单查。`status --site all` 会检查全部八个站点，`login` 支持相同选项。学校要求重新认证时运行 `tongji login --site 站点名`。
+`tongji login` 打开专用浏览器，依次访问同济 Canvas 和教务工作台。请在学校页面完成认证，让命令自行关闭窗口。它会另起进程验证登录是否保留。Chrome 的专用配置位于 `~/.local/share/tongji-cli/chrome`。`tongji status` 默认检查教务与 Canvas。用 `--site` 可单查 `canvas`、`jw`、`service`、`library`、`space`、`card`、`stadium`、`media` 或 `chaoxing`。`status --site all` 检查全部站点，`login` 支持相同选项。学校要求重新认证时运行 `tongji login --site 站点名`。
 
 如需将校园登录与日常 Chrome 窗口区分开，可在终端运行 `export TONGJI_BROWSER=chromium`。这个选项使用 Playwright 的 Chromium 及独立目录 `~/.local/share/tongji-cli/chromium`。尚未安装该浏览器时，运行 `uv run --with playwright==1.62.0 playwright install chromium`。登录和后续查询均在同一配置下运行。首次切换需在学校页面登录，新开终端时也要设置同一变量。
 
@@ -262,9 +262,9 @@ tongji chaoxing assignments --course "课程ID:班级ID" --next 7 --json
 tongji week --include-chaoxing --json
 ```
 
-`login`、`status`、`today`、`week` 默认均只覆盖教务与 Canvas。先运行 `login --site chaoxing` 完成学习通认证，再用 `week --include-chaoxing` 或 `today --include-chaoxing` 显式加入学习通。学习通作业放在每天的 `chaoxing_assignments` 中；截止时间缺失或缺少年份的作业放在 `week.undated_assignments`，保留 `due_as_listed` 原文。`today` 只列出能确认当天截止的作业。部分来源失败时保留其他结果并返回 `partial`，非零退出码不代表没有可用数据。
+`login`、`status`、`today`、`week` 默认查询教务与 Canvas。完成学习通认证后，用 `--include-chaoxing` 将它加入日程。`today` 的 `chaoxing.items` 列出当天截止项，`week` 按上海日期把已知截止项放入每日的 `chaoxing_assignments`。截止时间未知的作业分别放在 `chaoxing.undated_assignments` 和 `week.undated_assignments`，官方时间原文在 `due_as_listed`。
 
-课程范围是当前机构“我学的课”目录，不含归档目录和其他机构；作业不包括考试、章节测验。`--next` 以上海日期筛选，截止时间未知的条目仍保留。课程同名多班时使用 `courses` 返回的复合 ID。页面无法识别时返回未核实，不将其当作零项。登录过期或出现验证时，在官方页面重新认证。
+查询覆盖当前机构“我学的课”目录中的普通作业。`--next N` 筛选从今天起连续 N 个上海日期，并保留截止时间未知的条目。同名多班使用 `courses` 返回的复合 ID。遇到分页、坏条目或单门课程读取失败时，`partial` 和 `errors` 说明缺失范围，`items` 保留已核实的条目。命令此时返回非零退出码。学习通来源为 `partial` 时，某天缺少 `chaoxing_assignments` 表示该天的数量未核实。登录过期或出现验证时，在官方网页重新认证。
 
 此扩展只读取学习通信息，不提供交作业、考试、签到或代学操作。首次登录使用通用官方入口，可在官方登录页选择单位账号或其他登录方式；尚未单独验证各校定制门户。
 

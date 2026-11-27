@@ -8,6 +8,18 @@ from tongji_cli import chaoxing
 from tongji_cli.common import QueryUnavailable
 from tongji_cli.schedule import week_view
 
+def mock_read(pages):
+    replies = iter(pages)
+
+    def read(context, url, params=None, *, expected_ids=None):
+        body = next(replies)
+        if isinstance(body, Exception):
+            raise body
+        return body, url
+
+    return patch.object(chaoxing, 'read', side_effect=read)
+
+
 class ValuesTest(unittest.TestCase):
     def test_deadline_requires_year_and_valid_date(self):
         self.assertEqual(chaoxing.deadline('作答时间:2026-11-01 09:00至2026-12-01 09:00'), '2026-12-01T09:00:00+08:00')
@@ -25,7 +37,7 @@ class ValuesTest(unittest.TestCase):
             with self.assertRaises(QueryUnavailable):chaoxing.safe_url(url)
 
     def test_login_redirect_does_not_forward_request(self):
-        context=Mock(); context.request.get.return_value=Mock(status=302,headers={'location':'https://passport2.chaoxing.com/login'})
+        context=Mock(); context.request.get.return_value=Mock(status=302, url='https://i.chaoxing.com/base', headers={'location':'https://passport2.chaoxing.com/login'})
         with self.assertRaisesRegex(QueryUnavailable,'登录已失效'):chaoxing.read(context,'https://i.chaoxing.com/base')
         self.assertEqual(context.request.get.call_args.kwargs['max_redirects'],0)
         self.assertEqual(context.request.get.call_count,1)
@@ -54,7 +66,7 @@ class ValuesTest(unittest.TestCase):
 
     def test_external_redirect_is_not_requested(self):
         context = Mock()
-        context.request.get.return_value = Mock(status=302, headers={'location': 'https://evil.org/path'})
+        context.request.get.return_value = Mock(status=302, url='https://i.chaoxing.com/base', headers={'location': 'https://evil.org/path'})
         with self.assertRaises(QueryUnavailable):
             chaoxing.read(context, 'https://i.chaoxing.com/base')
         self.assertEqual(context.request.get.call_count, 1)
@@ -72,19 +84,19 @@ class BrowserParsingTest(unittest.TestCase):
 
     def test_courses_uses_card_title_and_keeps_classes(self):
         html=''.join(f'<div class="course"><div><a href="https://mooc1.chaoxing.com/visit/stucoursemiddle?courseid=1&amp;clazzid={n}&amp;cpi=3"><img></a></div><span class="course-name" title="课程甲">课程甲</span></div>' for n in (2,4))
-        with patch.object(chaoxing,'read',side_effect=['var fid = \'123\';',html]):
+        with mock_read(['var fid = \'123\';',html]):
             rows=chaoxing.courses(None,self.page)
         self.assertEqual([x['title'] for x in rows],['课程甲','课程甲'])
         self.assertNotEqual(rows[0]['id'],rows[1]['id'])
 
     def test_unknown_list_does_not_mean_empty(self):
-        with patch.object(chaoxing,'read',side_effect=['var fid = \'123\';','<html>页面已更改</html>']):
+        with mock_read(['var fid = \'123\';','<html>页面已更改</html>']):
             with self.assertRaises(QueryUnavailable):chaoxing.courses(None,self.page)
 
     def test_work_list_and_missing_year(self):
         course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'课程甲'}
         work='<li onclick="goTask(this);" data="https://mooc1.chaoxing.com/mooc2/work/task?workId=9"><p class="overHidden2 fl">报告</p><p class="status fl">未完成</p></li>'
-        with patch.object(chaoxing,'courses',return_value=[course]),patch.object(chaoxing,'read',side_effect=['<input id="workEnc" value="fixture">',work,'作答时间:01-04 16:14至02-01 00:00']):
+        with patch.object(chaoxing,'courses',return_value=[course]),mock_read(['<input id="workEnc" value="fixture">',work,'作答时间:01-04 16:14至02-01 00:00']):
             result=chaoxing.assignments(None,self.page)
         item=result['items'][0]
         self.assertEqual(result['status'],'ok');self.assertEqual(item['id'],'1:2:9')
@@ -92,7 +104,7 @@ class BrowserParsingTest(unittest.TestCase):
 
     def test_course_failure_keeps_other_course(self):
         rows=[{'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'甲'},{'id':'4:5','course_id':'4','class_id':'5','cpi':'3','title':'乙'}]
-        with patch.object(chaoxing,'courses',return_value=rows),patch.object(chaoxing,'read',side_effect=['no signature','<input id="workEnc" value="fixture">','暂无作业']):
+        with patch.object(chaoxing,'courses',return_value=rows),mock_read(['no signature','<input id="workEnc" value="fixture">','暂无作业']):
             result=chaoxing.assignments(None,self.page)
         self.assertEqual(result['status'],'partial');self.assertEqual(len(result['errors']),1);self.assertEqual(result['items'],[])
 
@@ -103,14 +115,14 @@ class BrowserParsingTest(unittest.TestCase):
 
     def test_malformed_course_identity_is_not_silently_skipped(self):
         html = '<a href="stucoursemiddle?courseid=1&amp;clazzid=2" title="课程甲">课程甲</a>'
-        with patch.object(chaoxing, 'read', side_effect=["var fid = '123';", html]):
+        with mock_read(["var fid = '123';", html]):
             with self.assertRaisesRegex(QueryUnavailable, '标识'):
                 chaoxing.courses(None, self.page)
 
     def test_failed_details_keep_listed_assignment(self):
         course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'课程甲'}
         work='<li data="https://mooc1.chaoxing.com/mooc2/work/task?workId=9"><p class="overHidden2">报告</p><p class="status">未完成</p></li>'
-        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=['<input id="workEnc" value="fixture">',work,QueryUnavailable('详情暂不可用')]):
+        with patch.object(chaoxing,'courses',return_value=[course]), mock_read(['<input id="workEnc" value="fixture">',work,QueryUnavailable('详情暂不可用')]):
             result=chaoxing.assignments(None,self.page)
         self.assertEqual(result['status'],'partial')
         self.assertEqual(result['items'][0]['title'],'报告')
@@ -124,14 +136,14 @@ class BrowserParsingTest(unittest.TestCase):
                 chaoxing.assignments(None,self.page,' ')
 
     def test_pagination_is_not_reported_as_complete(self):
-        with patch.object(chaoxing,'read',side_effect=["var fid = '123';",'<a rel="next" href="?page=2">下一页</a>']):
+        with mock_read(["var fid = '123';",'<a rel="next" href="?page=2">下一页</a>']):
             with self.assertRaisesRegex(QueryUnavailable, '下一页'):
                 chaoxing.courses(None,self.page)
 
     def test_wrong_course_link_is_rejected(self):
         course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'课程甲'}
         work='<li data="https://mooc1.chaoxing.com/mooc2/work/task?workId=9&amp;courseId=99"><p class="overHidden2">报告</p><p class="status">未完成</p></li>'
-        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=['<input id="workEnc" value="fixture">',work]) as read:
+        with patch.object(chaoxing,'courses',return_value=[course]), mock_read(['<input id="workEnc" value="fixture">',work]) as read:
             result=chaoxing.assignments(None,self.page)
         self.assertEqual(result['status'],'partial')
         self.assertEqual(result['items'],[])
@@ -141,7 +153,7 @@ class BrowserParsingTest(unittest.TestCase):
         rows=[{'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'甲'},
               {'id':'4:5','course_id':'4','class_id':'5','cpi':'3','title':'乙'}]
         work='<li data="/mooc2/work/task?workId=9"><p class="overHidden2">报告</p><p class="status">未完成</p></li>'
-        with patch.object(chaoxing,'courses',return_value=rows), patch.object(chaoxing,'read',side_effect=[
+        with patch.object(chaoxing,'courses',return_value=rows), mock_read([
             '<input id="workEnc" value="x">','<p>你暂时没有权限查看此课程</p>',
             '<input id="workEnc" value="x">',work,'<p>作答时间：11-01 08:00 至 12-03 20:00</p>']):
             result=chaoxing.assignments(None,self.page)
@@ -151,7 +163,7 @@ class BrowserParsingTest(unittest.TestCase):
 
     def test_explicit_empty_work_list_is_ok(self):
         course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'甲'}
-        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=[
+        with patch.object(chaoxing,'courses',return_value=[course]), mock_read([
             '<input id="workEnc" value="x">','<p class="empty">暂无作业</p>']):
             result=chaoxing.assignments(None,self.page)
         self.assertEqual(result['status'],'ok');self.assertEqual(result['items'],[])
@@ -160,7 +172,7 @@ class BrowserParsingTest(unittest.TestCase):
         course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'甲'}
         work='<li data="/mooc2/work/task?workId=9"><p class="overHidden2">报告</p><p class="status">未完成</p></li>'
         detail='<p>作答时间：11-01 08:00 至 12-03 20:00</p><p>参考上一轮活动，报名截止时间：2025-06-01 12:00</p>'
-        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=[
+        with patch.object(chaoxing,'courses',return_value=[course]), mock_read([
             '<input id="workEnc" value="x">',work,detail]):
             result=chaoxing.assignments(None,self.page)
         item=result['items'][0]
@@ -180,7 +192,7 @@ class BrowserParsingTest(unittest.TestCase):
     def test_script_next_marks_work_list_partial(self):
         course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'甲'}
         control='<div class="pagination"><a rel="next" href="#" onclick="loadPage(2);return false">下一页</a></div>'
-        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=[
+        with patch.object(chaoxing,'courses',return_value=[course]), mock_read([
             '<input id="workEnc" value="x">',control]):
             result=chaoxing.assignments(None,self.page)
         self.assertEqual(result['status'],'partial');self.assertIn('下一页',result['errors'][0]['detail'])
@@ -188,7 +200,7 @@ class BrowserParsingTest(unittest.TestCase):
     def test_encoded_query_value_is_preserved_for_request_and_output(self):
         course={'id':'1:2','course_id':'1','class_id':'2','cpi':'3','title':'甲'}
         work='<li data="/mooc2/work/task?workId=9&amp;label=A%26B"><p class="overHidden2">报告</p><p class="status">未完成</p></li>'
-        with patch.object(chaoxing,'courses',return_value=[course]), patch.object(chaoxing,'read',side_effect=[
+        with patch.object(chaoxing,'courses',return_value=[course]), mock_read([
             '<input id="workEnc" value="x">',work,'<p>作答时间：11-01 08:00 至 12-03 20:00</p>']) as read:
             result=chaoxing.assignments(None,self.page)
         target='https://mooc1.chaoxing.com/mooc2/work/task?workId=9&label=A%26B'
