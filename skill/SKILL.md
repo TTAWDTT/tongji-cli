@@ -1,6 +1,6 @@
 ---
 name: tongji-cli
-description: 使用 tongji 查询同济大学教务课表、Canvas 作业、录课、图书馆和校园服务；适用于需要复用本人校园登录、下载校方材料、提交作业、预约或核对办理回执的任务。
+description: 使用 tongji 查询同济大学教务课表、Canvas 与学习通作业、录课、图书馆和校园服务；适用于需要复用本人校园登录、下载校方材料、提交作业、预约或核对办理回执的任务。
 ---
 
 # tongji-cli
@@ -42,7 +42,7 @@ PyPI 包名为 `tongji-cli`，终端命令为 `tongji`。先用 `tongji --help` 
 ## 会话与结果约定
 
 - 沿用环境中的 `TONGJI_BROWSER`。Chrome 和 Chromium 各用自己的校园登录配置。同一配置下的浏览器命令顺序执行，避免争用专用窗口。遇到配置正被占用的提示，等前一条命令结束再查。
-- `tongji status --json` 默认检查 Canvas 和教务。单站示例是 `tongji status --site canvas --json`。其余站点名为 `jw`（教务）、`media`（录课）、`service`（一网通办）、`library`（借阅）、`space`（空间预约）、`stadium`（体育）、`card`（一卡通）。公开查询可直接执行。
+- `tongji status --json` 默认检查 Canvas 和教务。单站示例是 `tongji status --site canvas --json`。其余站点名为 `jw`（教务）、`chaoxing`（学习通）、`media`（录课）、`service`（一网通办）、`library`（借阅）、`space`（空间预约）、`stadium`（体育）、`card`（一卡通）。公开查询可直接执行。
 - 目标站返回 `login_required` 时，用该站的登录命令，如 `tongji login --site canvas --json`。让用户在学校窗口完成认证并等 CLI 自行关闭窗口；`after_restart=authenticated` 表示重开后仍有效。密码、验证码和 Cookie 留在浏览器里。
 - 如果终端能查但 agent 在启动浏览器时遇到 `EPERM`，先检查 agent 是否继承同一个浏览器设置，以及沙箱是否允许本次查询启动浏览器、使用临时目录和专用配置。需要授权时，说明要执行的具体命令。这个错误本身无法判断校园登录是否过期。
 - 同时读取退出码和 stdout 的 JSON。非零退出时仍可能有可用条目。按来源读取 `status`、`detail`、`items`，有 `sources` 时也检查各子来源。若进程只在 stderr 报错，就报告该错误。
@@ -193,3 +193,12 @@ tongji library rooms receipts --json
 - **办理**说明当前到了预览、已提交、待审核或已办结哪一步。能取得回执时带上与任务相关的编号或时间。用户问“我的申请通过了吗”，已有申请编号只证明提交过，还要看校方最新审批状态。
 
 其他命令、参数和生产环境验收范围见[仓库 README](https://github.com/TTAWDTT/tongji-cli#readme)。可随时用具体子命令的 `--help` 核对当前安装版本支持的选项。
+
+## 学习通网页版
+
+- `tongji login --site chaoxing` 由用户在官方窗口认证；`status --site chaoxing --json` 核对登录。
+- `tongji chaoxing courses --json` 列出当前机构我学的课；同名多班使用复合 ID。
+- `tongji chaoxing assignments --course "课程ID:班级ID" --json` 读取普通作业、提交状态及官方作答时间；省略课程查询当前目录。
+- `today` 和 `week` 用 `--include-chaoxing` 加入学习通。默认 `login/status/today/week` 查询教务与 Canvas。`today` 在 `chaoxing.items` 返回当天截止项，在 `chaoxing.undated_assignments` 单列未知日期。`week` 在每日 `chaoxing_assignments` 返回已知截止项，在 `week.undated_assignments` 单列未知日期。回答待办时同时检查两处。
+- `status=partial` 时，只报告已核实条目，结合 `errors` 说明受影响的课程、班级或作业。分页时保留已读页，课程目录不完整时用已返回的复合 ID 精确查询。部分周结果中，缺少每日学习通字段的日期数量待核实。
+- `submitted=null` 表示提交情况待核实。`due=null` 时照录 `due_as_listed`，保留待定、无年份或不完整的官方表述。学习通查询范围限于普通作业，考试和章节测验另属其他栏目。
