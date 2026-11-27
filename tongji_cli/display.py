@@ -9,8 +9,18 @@ def display(results, as_json):
             print(f"{site}: {entry['status']}")
             if "after_restart" in entry:
                 print(f"重开专用浏览器后: {entry['after_restart']}")
+            if entry.get("scope"):
+                print(entry["scope"])
             if "detail" in entry:
                 print(entry["detail"])
+            if entry.get("errors"):
+                print("部分课程未能核实：")
+                for error in entry["errors"]:
+                    print_record(error)
+            if entry.get("undated_assignments"):
+                print("学习通截止时间未知的作业：")
+                for item in entry["undated_assignments"]:
+                    print_record(item)
             if "items" in entry:
                 print(f"共 {len(entry['items'])} 项")
                 for item in entry["items"]:
@@ -21,6 +31,8 @@ def display(results, as_json):
 
 
 FIELD_LABELS = {
+    "chaoxing_assignments": "学习通作业", "undated_assignments": "截止时间未知的作业",
+    "due_as_listed": "官方作答时间原文", "class_id": "班级 ID", "courses_checked": "已查课程数",
     "assignment_receipt": "本人作业回执", "menu_path": "菜单路径", "syllabus_id": "大纲编号",
     "candidate_windows": "达到最短预约时长的空档", "receipt_id": "回执编号",
     "topic_options": "可选申请主题", "topic": "申请主题", "purpose_filled": "已填写申请内容",

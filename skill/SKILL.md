@@ -1,6 +1,6 @@
 ---
 name: tongji-cli
-description: 使用 tongji 查询同济大学教务课表、Canvas 作业、录课、图书馆和校园服务；适用于需要复用本人校园登录、下载校方材料、提交作业、预约或核对办理回执的任务。
+description: 使用 tongji 查询同济大学教务课表、Canvas 与学习通作业、录课、图书馆和校园服务；适用于需要复用本人校园登录、下载校方材料、提交作业、预约或核对办理回执的任务。
 ---
 
 # tongji-cli
@@ -193,3 +193,11 @@ tongji library rooms receipts --json
 - **办理**说明当前到了预览、已提交、待审核或已办结哪一步。能取得回执时带上与任务相关的编号或时间。用户问“我的申请通过了吗”，已有申请编号只证明提交过，还要看校方最新审批状态。
 
 其他命令、参数和生产环境验收范围见[仓库 README](https://github.com/TTAWDTT/tongji-cli#readme)。可随时用具体子命令的 `--help` 核对当前安装版本支持的选项。
+
+## 学习通网页版（本地扩展）
+
+- `tongji login --site chaoxing` 由用户在官方窗口认证；`status --site chaoxing --json` 核对登录。
+- `tongji chaoxing courses --json` 列出当前机构我学的课；同名多班使用复合 ID。
+- `tongji chaoxing assignments --course "课程ID:班级ID" --json` 读取普通作业、提交状态及官方作答时间；省略课程查询当前目录。
+- `week` 已包含学习通；每日 `chaoxing_assignments` 是可定位日期的作业，`week.undated_assignments` 是截止时间未知的作业。回答待办时检查两处，不能将未知日期说成本周到期或已逾期。`today` 仅含能确认当天截止的项。
+- 只读取普通作业，不含考试和章节测验，不提供学习通提交操作。部分课程失败时保留成功项和错误范围。读取 `due_as_listed` 时保留原文，不补造年份。

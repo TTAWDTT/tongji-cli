@@ -248,3 +248,22 @@ curl -fsSL --create-dirs -o "$HOME/.claude/skills/tongji-cli/SKILL.md" https://r
 ```sh
 uv run python -m unittest discover -s tests -v
 ```
+
+## 学习通网页版（本地扩展）
+
+使用同一专用浏览器配置保存学习通会话；在超星官方网页登录后可读取课程、普通作业和提交状态。
+
+```sh
+tongji login --site chaoxing
+tongji status --site chaoxing --json
+tongji chaoxing courses --json
+tongji chaoxing assignments --json
+tongji chaoxing assignments --course "课程ID:班级ID" --next 7 --json
+tongji week --json
+```
+
+`week` 同时查询教务、Canvas、学习通。学习通作业放在每天的 `chaoxing_assignments` 中；截止时间缺失或缺少年份的作业放在 `week.undated_assignments`，保留 `due_as_listed` 原文。`today` 只列出能确认当天截止的作业。部分来源失败时保留其他结果并返回 `partial`，非零退出码不代表没有可用数据。
+
+课程范围是当前机构“我学的课”目录，不含归档目录和其他机构；作业不包括考试、章节测验。`--next` 以上海日期筛选，截止时间未知的条目仍保留。课程同名多班时使用 `courses` 返回的复合 ID。页面无法识别时返回未核实，不将其当作零项。登录过期或出现验证时，在官方页面重新认证。
+
+此扩展只读取学习通信息，不提供交作业、考试、签到或代学操作。首次登录使用通用官方入口，可在官方登录页选择单位账号或其他登录方式；尚未单独验证各校定制门户。

@@ -24,9 +24,15 @@ def arguments():
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("login", "status"):
         cmd = commands.add_parser(name)
-        cmd.add_argument("--site", choices=["all", *SITES], help="默认检查教务和 Canvas；all 包括一网通办、图书馆、空间预约、一卡通、体育场馆和教学媒体平台")
+        cmd.add_argument("--site", choices=["all", *SITES], help="默认检查教务和 Canvas；all 包括一网通办、图书馆、空间预约、一卡通、体育场馆、教学媒体平台和学习通")
     commands.add_parser("today", help="今日课表、今日截止作业")
     commands.add_parser("week", help="未来七个上海日期的课表和作业")
+    cx = commands.add_parser("chaoxing", help="学习通课程与作业查询")
+    cx_ops = cx.add_subparsers(dest="operation", required=True)
+    cx_ops.add_parser("courses")
+    cx_work = cx_ops.add_parser("assignments")
+    cx_work.add_argument("--course")
+    cx_work.add_argument("--next", type=int, choices=range(1, 367), metavar="DAYS")
     jw.configure(commands)
     media.configure(commands)
     canvas.configure(commands)
@@ -45,6 +51,15 @@ def arguments():
 
 def site_items(args, site, context, page, now):
     day = now.date()
+    if site == "chaoxing":
+        from tongji_cli import chaoxing
+        if args.command in {"today", "week"}:
+            result = chaoxing.assignments(context, page)
+            if args.command == "today":
+                result["undated_assignments"] = [x for x in result["items"] if not x.get("due")]
+                result["items"] = [x for x in result["items"] if x.get("due") and x["due"][:10] == day.isoformat()]
+            return result
+        return chaoxing.run(args, context, page, now)
     if args.command in {"today", "week"}:
         return schedule_items(args, site, context, page, day)
     if site == "stadium":
